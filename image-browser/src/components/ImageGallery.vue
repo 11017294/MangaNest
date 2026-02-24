@@ -7,7 +7,7 @@
 
     <!-- 目录导航 -->
     <div
-        v-if="!loading && !error && treeDirectories.length"
+        v-if="!loading && !error && treeData.length"
         class="nav"
         :class="{ hide: !showNav }"
     >
@@ -18,7 +18,7 @@
 
       <div class="nav-content">
         <DirectoryTree
-            :tree-data="treeDirectories"
+            :tree-data="treeData"
             :current-directory="currentDirectory"
             :expanded-states="expandedStates"
             @node-click="switchDirectory"
@@ -27,7 +27,7 @@
     </div>
 
     <button
-        v-if="!showNav && treeDirectories.length"
+        v-if="!showNav && treeData.length"
         class="nav-btn"
         @click="toggleNav"
     >
@@ -35,7 +35,7 @@
     </button>
 
     <!-- 图片列表 -->
-    <div v-if="filteredImages.length" class="image-list">
+    <div v-if="currentDirectoryImages.length" class="image-list">
       <div
           v-for="(img,index) in displayedImages"
           :key="img.path + index"
@@ -54,11 +54,11 @@
 
     <div
         ref="sentinel"
-        v-if="displayedImages.length < filteredImages.length"
+        v-if="displayedImages.length < currentDirectoryImages.length"
         class="sentinel"
     />
 
-    <div v-if="!loading && !error && !filteredImages.length" class="state">
+    <div v-if="!loading && !error && !currentDirectoryImages.length" class="state">
       当前目录没有图片
     </div>
 
@@ -79,9 +79,10 @@ import DirectoryTree from './DirectoryTree.vue'
 
 /* ===================== 基础状态 ===================== */
 
-const allImages = ref([])
+const treeData = ref([])
+const currentDirectoryImages = ref([])
 const displayedImages = ref([])
-const loading = ref(true)
+const loading = ref(false)
 const error = ref('')
 const currentDirectory = ref('')
 const showNav = ref(true)
@@ -101,112 +102,57 @@ const getBaseUrl = () => {
   return `${protocol}//${hostname}:3001`
 }
 
-const fetchImages = async () => {
+// 获取目录结构
+const fetchDirectoryTree = async () => {
   try {
-    const res = await fetch(`${getBaseUrl()}/api/images`)
+    const res = await fetch(`${getBaseUrl()}/api/directories`)
+    if (!res.ok) throw new Error()
+    treeData.value = await res.json()
+  } catch (e) {
+    error.value = '加载目录失败'
+    console.error(e)
+  }
+}
+
+// 获取当前目录图片
+const fetchImages = async (dir) => {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/images?dir=${encodeURIComponent(dir)}`)
     if (!res.ok) throw new Error()
 
     const data = await res.json()
-
-    data.sort((a,b)=>
-        a.name.localeCompare(b.name,undefined,{numeric:true})
-    )
-
-    allImages.value = data
-
-    if (directories.value.length) {
-      currentDirectory.value = directories.value[0]
-    }
-
+    // 后端已经排好序了，这里直接使用
+    currentDirectoryImages.value = data
+    
+    // 重置显示
+    displayedImages.value = []
     await nextTick()
     loadInitial()
 
-  } catch {
-    error.value = '服务器连接失败'
+  } catch (e) {
+    error.value = '加载图片失败'
+    console.error(e)
   } finally {
     loading.value = false
   }
 }
 
-/* ===================== 目录构建 ===================== */
-
-const directories = computed(()=>{
-  const set = new Set()
-  allImages.value.forEach(img=>{
-    const dir = img.relativePath.substring(
-        0,
-        img.relativePath.lastIndexOf('\\')
-    )
-    set.add(dir || '')
-  })
-  return Array.from(set).sort()
-})
-
-const treeDirectories = computed(()=>{
-  const map = new Map()
-
-  allImages.value.forEach(img=>{
-    const parts = img.relativePath.split('\\')
-    let path = ''
-
-    for(let i=0;i<parts.length-1;i++){
-      const part = parts[i]
-      const parent = path
-      path = path ? `${path}\\${part}` : part
-
-      if(!map.has(path)){
-        map.set(path,{
-          path,
-          name:part,
-          children:[]
-        })
-      }
-    }
-  })
-
-  const roots=[]
-
-  map.forEach((node,path)=>{
-    const parts = path.split('\\')
-    if(parts.length===1){
-      roots.push(node)
-    }else{
-      const parent = map.get(parts.slice(0,-1).join('\\'))
-      parent && parent.children.push(node)
-    }
-  })
-
-  return roots
-})
-
-/* ===================== 过滤 ===================== */
-
-const filteredImages = computed(()=>{
-  if(!currentDirectory.value){
-    return allImages.value.filter(
-        img=>!img.relativePath.includes('\\')
-    )
-  }
-
-  return allImages.value.filter(img=>
-      img.relativePath.startsWith(currentDirectory.value+'\\')
-  )
-})
-
 /* ===================== 无限滚动 ===================== */
 
 const loadInitial = ()=>{
-  displayedImages.value = filteredImages.value.slice(0,initialBatch)
+  displayedImages.value = currentDirectoryImages.value.slice(0,initialBatch)
   setupObserver()
 }
 
 const loadMore = ()=>{
   if(isLoadingMore.value) return
-  if(displayedImages.value.length >= filteredImages.value.length) return
+  if(displayedImages.value.length >= currentDirectoryImages.value.length) return
 
   isLoadingMore.value = true
 
-  const next = filteredImages.value.slice(
+  const next = currentDirectoryImages.value.slice(
       displayedImages.value.length,
       displayedImages.value.length + batchSize
   )
@@ -226,7 +172,7 @@ const setupObserver = ()=>{
       loadMore()
     }
   },{
-    root: null,              // 关键：使用 document 作为滚动容器
+    root: null,
     rootMargin: '200px',
     threshold: 0
   })
@@ -240,9 +186,10 @@ watch(sentinel,(el)=>{
   }
 })
 
-watch(currentDirectory,()=>{
+// 监听目录变化，加载图片
+watch(currentDirectory, (newDir)=>{
   window.scrollTo({ top: 0, behavior: 'auto' })
-  loadInitial()
+  fetchImages(newDir)
 })
 
 /* ===================== 操作 ===================== */
@@ -258,7 +205,19 @@ const getImageUrl = (relativePath)=>{
   return `${getBaseUrl()}/api/image/${encodeURIComponent(relativePath)}`
 }
 
-onMounted(fetchImages)
+// 初始化
+onMounted(async () => {
+  await fetchDirectoryTree()
+  // 如果有目录，默认选中第一个目录并加载图片
+  if (treeData.value.length > 0) {
+    const firstDir = treeData.value[0]
+    currentDirectory.value = firstDir.path
+  } else {
+    // 否则加载根目录图片
+    fetchImages('')
+  }
+})
+
 onUnmounted(()=> observer?.disconnect())
 </script>
 
@@ -344,5 +303,10 @@ onUnmounted(()=> observer?.disconnect())
   background: #111;
   color: #fff;
   font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
 }
 </style>

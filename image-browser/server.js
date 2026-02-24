@@ -16,41 +16,90 @@ app.use(cors());
 // 图片目录路径
 const IMAGE_DIR = 'D:\\DataStorage\\open';
 
-// 获取所有图片文件
+// 获取目录树（只获取目录结构）
+app.get('/api/directories', (req, res) => {
+    try {
+        const getDirTree = (currentPath) => {
+            const items = fs.readdirSync(currentPath);
+            const dirs = [];
+
+            items.forEach(item => {
+                const fullPath = path.join(currentPath, item);
+                try {
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        dirs.push({
+                            name: item,
+                            path: path.relative(IMAGE_DIR, fullPath).replace(/\\/g, '/'),
+                            fullPath: fullPath
+                        });
+                    }
+                } catch (e) {
+                    // 忽略无法访问的目录
+                }
+            });
+
+            // Windows 文件名自然排序
+            dirs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+            return dirs.map(dir => ({
+                name: dir.name,
+                path: dir.path,
+                children: getDirTree(dir.fullPath)
+            }));
+        };
+
+        const tree = getDirTree(IMAGE_DIR);
+        res.json(tree);
+    } catch (error) {
+        console.error('Error scanning directories:', error);
+        res.status(500).json({ error: 'Failed to scan directories' });
+    }
+});
+
+// 获取指定目录下的图片
 app.get('/api/images', (req, res) => {
     try {
+        const dirParam = req.query.dir || '';
+        const targetDir = path.join(IMAGE_DIR, dirParam);
+
+        // 安全检查
+        const normalizedTarget = path.normalize(targetDir);
+        const normalizedBase = path.normalize(IMAGE_DIR);
+        if (!normalizedTarget.startsWith(normalizedBase)) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+
+        if (!fs.existsSync(targetDir)) {
+            return res.status(404).json({ error: 'Directory not found' });
+        }
+
+        const files = fs.readdirSync(targetDir);
         const images = [];
 
-        function scanDirectory(dir) {
-            const files = fs.readdirSync(dir);
-
-            files.forEach(file => {
-                const filePath = path.join(dir, file);
+        files.forEach(file => {
+            const filePath = path.join(targetDir, file);
+            try {
                 const stat = fs.statSync(filePath);
-
-                if (stat.isDirectory()) {
-                    // 递归扫描子目录
-                    scanDirectory(filePath);
-                } else {
-                    // 检查是否为图片文件
+                if (stat.isFile()) {
                     const ext = path.extname(file).toLowerCase();
                     if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
                         images.push({
                             name: file,
                             path: filePath,
-                            relativePath: path.relative(IMAGE_DIR, filePath),
+                            relativePath: path.relative(IMAGE_DIR, filePath).replace(/\\/g, '/'),
                             size: stat.size,
                             mtime: stat.mtime
                         });
                     }
                 }
-            });
-        }
+            } catch (e) {
+                // 忽略错误
+            }
+        });
 
-        scanDirectory(IMAGE_DIR);
-
-        // 按修改时间排序，最新的在前面
-        images.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+        // 按文件名自然升序排序
+        images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
         res.json(images);
     } catch (error) {
