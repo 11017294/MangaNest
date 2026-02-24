@@ -20,22 +20,24 @@ const IMAGE_DIR = 'D:\\DataStorage\\open';
 app.get('/api/directories', (req, res) => {
     try {
         const getDirTree = (currentPath) => {
-            const items = fs.readdirSync(currentPath);
+            let items;
+            try {
+                items = fs.readdirSync(currentPath, { withFileTypes: true });
+            } catch (e) {
+                // 如果无法读取目录（如权限不足），则返回空
+                return [];
+            }
+            
             const dirs = [];
 
             items.forEach(item => {
-                const fullPath = path.join(currentPath, item);
-                try {
-                    const stat = fs.statSync(fullPath);
-                    if (stat.isDirectory()) {
-                        dirs.push({
-                            name: item,
-                            path: path.relative(IMAGE_DIR, fullPath).replace(/\\/g, '/'),
-                            fullPath: fullPath
-                        });
-                    }
-                } catch (e) {
-                    // 忽略无法访问的目录
+                if (item.isDirectory()) {
+                    const fullPath = path.join(currentPath, item.name);
+                    dirs.push({
+                        name: item.name,
+                        path: path.relative(IMAGE_DIR, fullPath).replace(/\\/g, '/'),
+                        fullPath: fullPath
+                    });
                 }
             });
 

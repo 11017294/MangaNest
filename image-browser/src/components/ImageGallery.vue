@@ -207,7 +207,14 @@ const getImageUrl = (relativePath)=>{
 
 // 初始化
 onMounted(async () => {
+  loading.value = true
   await fetchDirectoryTree()
+  
+  if (error.value) {
+    loading.value = false
+    return
+  }
+
   // 如果有目录，默认选中第一个目录并加载图片
   if (treeData.value.length > 0) {
     const firstDir = treeData.value[0]
