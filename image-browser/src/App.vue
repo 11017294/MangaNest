@@ -1,9 +1,8 @@
 <template>
-  <ImageGallery />
-</template>
+  <router-view />
+  </template>
 
 <script setup>
-import ImageGallery from './components/ImageGallery.vue'
 </script>
 
 <style>
