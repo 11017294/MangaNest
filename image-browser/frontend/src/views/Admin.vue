@@ -73,23 +73,30 @@
         @contextmenu.prevent
       >
         <template #item="{ element: folder }">
-            <div 
-                class="folder-item"
-                @click="!isEditing('folder', folder.path) && navigateTo(folder.path)"
-                @contextmenu.prevent.stop="showContextMenu($event, folder, 'folder')"
-                :title="folder.name"
-            >
-                <div class="folder-content-wrapper">
-                    <div v-if="folder.coverImage" class="folder-cover-wrapper">
-                        <img :src="getImageUrl(folder.coverImage)" loading="lazy" class="folder-cover-img" />
+            <div class="folder-tile" @contextmenu.prevent.stop="showContextMenu($event, folder, 'folder')">
+                <div 
+                    class="folder-item"
+                    @click="!isEditing('folder', folder.path) && navigateTo(folder.path)"
+                    :title="folder.name"
+                >
+                    <div class="folder-content-wrapper">
+                        <div v-if="folder.coverImage" class="folder-cover-wrapper">
+                            <img :src="getImageUrl(folder.coverImage)" loading="lazy" class="folder-cover-img" />
+                        </div>
+                        <div v-else class="folder-icon-large">📁</div>
+                        <div class="folder-type-badge">DIR</div>
                     </div>
-                    <div v-else class="folder-icon-large">📁</div>
-                    <div class="folder-type-badge">DIR</div>
                 </div>
-                <div v-if="!isEditing('folder', folder.path)" class="folder-name" :title="folder.name">{{ folder.name }}</div>
+                <div 
+                    v-if="!isEditing('folder', folder.path) && showImageNames" 
+                    class="folder-title" 
+                    :title="folder.name"
+                >
+                    {{ folder.name }}
+                </div>
                 <input
-                    v-else
-                    class="rename-input"
+                    v-else-if="isEditing('folder', folder.path)"
+                    class="rename-input title-input"
                     v-model="renameEdit.name"
                     @keyup.enter="confirmInlineRename"
                     @blur="confirmInlineRename"
@@ -101,17 +108,24 @@
                 <div 
                     v-for="img in folderContent.images" 
                     :key="img.path" 
-                    class="image-item"
+                    class="image-tile"
                     @contextmenu.prevent.stop="showContextMenu($event, img, 'image')"
                     :title="img.name"
                 >
-                    <div class="image-wrapper">
-                         <img :src="getImageUrl(img.relativePath)" loading="lazy" />
+                    <div class="image-item">
+                        <div class="image-wrapper">
+                            <img :src="getImageUrl(img.relativePath)" loading="lazy" />
+                        </div>
                     </div>
-                    <div class="image-name" v-if="!isEditing('image', img.relativePath) && showImageNames">{{ img.name }}</div>
+                    <div 
+                        class="image-title" 
+                        v-if="!isEditing('image', img.relativePath) && showImageNames"
+                    >
+                        {{ img.name }}
+                    </div>
                     <input
-                        v-else
-                        class="rename-input"
+                        v-else-if="isEditing('image', img.relativePath)"
+                        class="rename-input title-input"
                         v-model="renameEdit.name"
                         @keyup.enter="confirmInlineRename"
                         @blur="confirmInlineRename"
@@ -1006,6 +1020,12 @@ onUnmounted(() => {
     justify-content: center;
 }
 
+.folder-tile {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
 .folder-item:hover {
     background: var(--item-hover);
     border-color: #888;
@@ -1056,6 +1076,17 @@ onUnmounted(() => {
     line-height: 1.2;
 }
 
+.folder-title {
+    font-size: 13px;
+    color: var(--text-color);
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 6px;
+    text-align: center;
+}
+
 .rename-input {
     width: 100%;
     padding: 6px 8px;
@@ -1067,21 +1098,22 @@ onUnmounted(() => {
     outline: none;
 }
 
+.title-input {
+    margin-top: 6px;
+}
+
 .folder-cover-wrapper {
     width: 100%;
     height: 100%;
     overflow: hidden;
     border-radius: 4px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: block;
     background: #000;
 }
 .folder-cover-img {
     width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: center center;
+    height: auto;
+    display: block;
     opacity: 0.8;
     transition: opacity 0.2s;
 }
@@ -1105,6 +1137,12 @@ onUnmounted(() => {
     height: 140px;
     display: flex;
     flex-direction: column;
+}
+
+.image-tile {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
 }
 
 .image-item:hover {
@@ -1131,16 +1169,13 @@ onUnmounted(() => {
     transform: scale(1.05);
 }
 
-.image-name {
-    padding: 6px 8px;
+.image-title {
+    padding: 6px 4px;
     font-size: 12px;
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    background: var(--sidebar-bg);
-    color: var(--text-color);
-    border-top: 1px solid var(--border-color);
 }
 
 /* Pagination */

@@ -3,7 +3,7 @@
 在项目根目录下执行：
 
 ```bash
-cd D:\code\MyCode\dev\MyCode\dev\page\image-browser
+cd D:\code\MyCode\dev\MyCode\dev\page\image-browser\frontend
 npm install
 ```
 
@@ -12,6 +12,7 @@ npm install
 后端服务运行在 3001 端口，负责文件操作和 SQLite 数据库管理。
 
 ```bash
+cd D:\code\MyCode\dev\MyCode\dev\page\image-browser\backend
 # 使用 npm 脚本启动
 npm run server
 

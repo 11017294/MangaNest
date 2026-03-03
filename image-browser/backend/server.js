@@ -105,7 +105,16 @@ app.delete('/api/menus/:id', async (req, res) => {
 // Scan directory and populate menus (Generate)
 app.post('/api/menus/scan', async (req, res) => {
     try {
-        await Menu.destroy({ where: {}, truncate: true });
+        if (!fs.existsSync(IMAGE_DIR)) {
+            return res.status(404).json({ error: 'Base image directory not found', base: IMAGE_DIR });
+        }
+        // SQLite 自引用外键可能阻止批量清空，这里临时关闭外键约束
+        await sequelize.query('PRAGMA foreign_keys = OFF');
+        // 重建菜单表以确保 parentId 可为空、无历史外键残留
+        const qi = sequelize.getQueryInterface();
+        try { await qi.dropTable('menus'); } catch (_) {}
+        await Menu.sync({ force: true });
+        await sequelize.query('PRAGMA foreign_keys = ON');
 
         const scanDir = async (currentPath, parentId = null) => {
             let items;
@@ -123,12 +132,18 @@ app.post('/api/menus/scan', async (req, res) => {
                 const fullPath = path.join(currentPath, dir.name);
                 const relativePath = path.relative(IMAGE_DIR, fullPath).replace(/\\/g, '/');
                 
-                const menu = await Menu.create({
-                    name: dir.name,
-                    path: relativePath,
-                    parentId: parentId,
-                    order: i
-                });
+                let menu;
+                try {
+                    menu = await Menu.create({
+                        name: dir.name,
+                        path: relativePath,
+                        parentId: parentId,
+                        order: i
+                    });
+                } catch (e) {
+                    console.error('Menu.create failed', { name: dir.name, path: relativePath, parentId, order: i, error: e.message });
+                    throw e;
+                }
 
                 await scanDir(fullPath, menu.id);
             }
@@ -138,7 +153,11 @@ app.post('/api/menus/scan', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Error scanning directories:', error);
-        res.status(500).json({ error: 'Failed to scan directories' });
+        let extra = undefined;
+        if (error && Array.isArray(error.errors)) {
+            extra = error.errors.map(e => ({ message: e.message, path: e.path, value: e.value }));
+        }
+        res.status(500).json({ error: 'Failed to scan directories', detail: error?.message || String(error), extra });
     }
 });
 
@@ -148,12 +167,31 @@ app.post('/api/menus/scan', async (req, res) => {
 // List folder content
 app.get('/api/folder-content', async (req, res) => {
     try {
-        const dirParam = req.query.dir || '';
+        const rawParam = req.query.dir || '';
+        const decodedParam = decodeURIComponent(String(rawParam).replace(/\+/g, ' '));
+        const baseDir = path.resolve(IMAGE_DIR);
+        const variants = [
+            decodedParam,
+            decodedParam.normalize('NFC'),
+            decodedParam.normalize('NFD'),
+            decodedParam.replace(/\u00A0/g, ' '),
+            decodedParam.replace(/ /g, '\u00A0'),
+            decodedParam.trim()
+        ];
+        let chosenParam = decodedParam;
+        for (const v of variants) {
+            const p = path.resolve(IMAGE_DIR, v);
+            const inside = process.platform === 'win32' ? p.toLowerCase().startsWith(baseDir.toLowerCase()) : p.startsWith(baseDir);
+            if (inside && fs.existsSync(p)) { chosenParam = v; break; }
+        }
+        const targetDir = path.resolve(IMAGE_DIR, chosenParam);
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 0; // 0 means all
-        const targetDir = path.join(IMAGE_DIR, dirParam);
         
-        if (!targetDir.startsWith(IMAGE_DIR)) return res.status(403).json({ error: 'Forbidden' });
+        const insideBase = process.platform === 'win32'
+            ? targetDir.toLowerCase().startsWith(baseDir.toLowerCase())
+            : targetDir.startsWith(baseDir);
+        if (!insideBase) return res.status(403).json({ error: 'Forbidden' });
         if (!fs.existsSync(targetDir)) return res.status(404).json({ error: 'Not found' });
 
         // Pre-fetch folder metadata to attach covers
@@ -166,9 +204,12 @@ app.get('/api/folder-content', async (req, res) => {
             .filter(item => item.isDirectory())
             .map(item => path.relative(IMAGE_DIR, path.join(targetDir, item.name)).replace(/\\/g, '/'));
 
-        const allMetadata = await FolderMetadata.findAll({
-            where: { path: dirPaths }
-        });
+        let allMetadata = [];
+        if (dirPaths.length > 0) {
+            allMetadata = await FolderMetadata.findAll({
+                where: { path: dirPaths }
+            });
+        }
         const metadataMap = {};
         allMetadata.forEach(m => metadataMap[m.path] = m.coverImage);
 
@@ -203,7 +244,8 @@ app.get('/api/folder-content', async (req, res) => {
             paginatedImages = images.slice(start, end);
         }
 
-        const metadata = await FolderMetadata.findByPk(dirParam.replace(/\\/g, '/')) || {};
+        const metadataKey = chosenParam.replace(/\\/g, '/');
+        const metadata = await FolderMetadata.findByPk(metadataKey) || {};
 
         res.json({ folders, images: paginatedImages, totalImages, metadata });
     } catch (error) {
@@ -428,16 +470,10 @@ app.post('/api/folder/cover', async (req, res) => {
     try {
         const { dir, imagePath } = req.body;
         const relativeDir = dir.replace(/\\/g, '/');
-        
-        const [metadata, created] = await FolderMetadata.findOrCreate({
-            where: { path: relativeDir },
-            defaults: { coverImage: imagePath }
+        await FolderMetadata.upsert({
+            path: relativeDir,
+            coverImage: imagePath
         });
-
-        if (!created) {
-            metadata.coverImage = imagePath;
-            await metadata.save();
-        }
 
         res.json({ success: true });
     } catch (error) {

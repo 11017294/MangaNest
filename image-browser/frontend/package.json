@@ -1,20 +1,18 @@
 {
-  "name": "image-browser",
+  "name": "image-hub-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "server": "node server.js"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "sequelize": "^6.37.7",
-    "sqlite3": "^5.1.7",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "vue": "^3.2.47"
+    "vue": "^3.2.47",
+    "vue-router": "^4.6.4",
+    "axios": "^1.6.7",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.0.0",

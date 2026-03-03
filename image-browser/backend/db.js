@@ -5,12 +5,22 @@ import { Sequelize, DataTypes } from 'sequelize'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// SQLite 文件路径（位于 image-browser 目录）
+// SQLite 文件路径（位于根目录或 backend 同级）
 const DB_PATH = path.join(__dirname, 'database.sqlite')
+let resolvedPath = DB_PATH
+try {
+  const fs = await import('fs')
+  if (!fs.existsSync(DB_PATH)) {
+    const parentPath = path.join(__dirname, '..', 'database.sqlite')
+    if (fs.existsSync(parentPath)) {
+      resolvedPath = parentPath
+    }
+  }
+} catch {}
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
-  storage: DB_PATH,
+  storage: resolvedPath,
   logging: false
 })
 
@@ -45,6 +55,28 @@ export const FolderMetadata = sequelize.define('FolderMetadata', {
 export const initDB = async () => {
   await sequelize.authenticate()
   await sequelize.sync()
+
+  const qi = sequelize.getQueryInterface()
+  try {
+    const schema = await qi.describeTable('folder_metadata')
+    if (!schema.note) {
+      await qi.addColumn('folder_metadata', 'note', { type: DataTypes.TEXT, allowNull: true })
+    }
+    if (schema.createdAt) {
+      try {
+        await qi.changeColumn('folder_metadata', 'createdAt', { type: DataTypes.DATE, allowNull: true })
+      } catch (e) {
+        try { await qi.removeColumn('folder_metadata', 'createdAt') } catch (_) {}
+      }
+    }
+    if (schema.updatedAt) {
+      try {
+        await qi.changeColumn('folder_metadata', 'updatedAt', { type: DataTypes.DATE, allowNull: true })
+      } catch (e) {
+        try { await qi.removeColumn('folder_metadata', 'updatedAt') } catch (_) {}
+      }
+    }
+  } catch (e) {}
 
   // 初始化一些缺省设置（可选）
   const defaults = [
