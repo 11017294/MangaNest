@@ -106,13 +106,13 @@
         <template #footer>
             <template v-if="showImages">
                 <div 
-                    v-for="img in folderContent.images" 
+                    v-for="(img, idx) in folderContent.images" 
                     :key="img.path" 
                     class="image-tile"
                     @contextmenu.prevent.stop="showContextMenu($event, img, 'image')"
                     :title="img.name"
                 >
-                    <div class="image-item">
+                    <div class="image-item" @dblclick="openPreview(idx)">
                         <div class="image-wrapper">
                             <img :src="getImageUrl(img.relativePath)" loading="lazy" />
                         </div>
@@ -254,6 +254,21 @@
         </div>
     </div>
 
+    <!-- Preview Modal -->
+    <div v-if="showPreview" class="preview-overlay" @click.self="closePreview">
+        <div class="preview-vertical">
+            <div class="preview-header">
+                <span class="preview-count">{{ previewStartIndex + 1 }} - {{ Math.min(previewStartIndex + previewWindowSize, totalImages) }} / {{ totalImages }}</span>
+                <button class="close-btn" @click="closePreview">×</button>
+            </div>
+            <div class="preview-scroll" ref="previewScrollRef" @scroll="onPreviewScroll">
+                <div v-for="img in previewImages" :key="img?.relativePath" class="preview-list-item">
+                    <img v-if="img" :src="getImageUrl(img.relativePath)" class="preview-list-img" />
+                </div>
+            </div>
+        </div>
+    </div>
+
   </div>
 </template>
 
@@ -280,6 +295,15 @@ const pageSize = ref(50)
 const currentPage = ref(1)
 const totalImages = ref(0)
 const totalPages = computed(() => Math.ceil(totalImages.value / pageSize.value))
+
+// Preview
+const showPreview = ref(false)
+const loadedPages = ref(new Set())
+const pageImages = ref({})
+const previewWindowSize = ref(5)
+const previewStartIndex = ref(0)
+const previewImages = ref([])
+const previewScrollRef = ref(null)
 
 // Context Menu
 const contextMenu = ref({ visible: false, x: 0, y: 0, target: null, type: null })
@@ -334,6 +358,83 @@ let timerInterval = null
 const API_BASE = 'http://localhost:3001/api'
 
 const getImageUrl = (path) => `${API_BASE}/image/${encodeURIComponent(path)}`
+
+const pageOf = (index) => Math.floor(index / pageSize.value) + 1
+const posInPage = (index) => index % pageSize.value
+
+const ensurePageLoaded = async (page) => {
+    if (loadedPages.value.has(page)) return
+    try {
+        const res = await axios.get(`${API_BASE}/folder-content`, {
+            params: {
+                dir: currentPath.value,
+                page,
+                limit: pageSize.value
+            }
+        })
+        pageImages.value[page] = res.data.images.map(i => ({ ...i, type: 'image' }))
+        totalImages.value = res.data.totalImages
+        loadedPages.value.add(page)
+    } catch (e) { console.error(e) }
+}
+
+const getImageByAbsoluteIndex = async (index) => {
+    const p = pageOf(index)
+    const pos = posInPage(index)
+    if (p === currentPage.value) {
+        if (!folderContent.value.images[pos]) await ensurePageLoaded(p)
+        return folderContent.value.images[pos]
+    }
+    await ensurePageLoaded(p)
+    return pageImages.value[p]?.[pos]
+}
+
+const fillPreviewWindow = async (start) => {
+    const size = previewWindowSize.value
+    const imgs = await Promise.all(
+        Array.from({ length: size }, (_, i) => getImageByAbsoluteIndex(start + i))
+    )
+    previewStartIndex.value = start
+    previewImages.value = imgs
+}
+
+const openPreview = async (localIndex) => {
+    const absIndex = (currentPage.value - 1) * pageSize.value + localIndex
+    const start = Math.max(0, absIndex - Math.floor(previewWindowSize.value / 2))
+    await fillPreviewWindow(start)
+    showPreview.value = true
+    if (previewScrollRef.value) previewScrollRef.value.scrollTop = 0
+}
+
+const shiftWindowDown = async () => {
+    const start = previewStartIndex.value
+    if (start + previewWindowSize.value >= totalImages.value) return
+    const nextImg = await getImageByAbsoluteIndex(start + previewWindowSize.value)
+    previewImages.value = [...previewImages.value.slice(1), nextImg]
+    previewStartIndex.value = start + 1
+}
+
+const shiftWindowUp = async () => {
+    const start = previewStartIndex.value
+    if (start <= 0) return
+    const prevImg = await getImageByAbsoluteIndex(start - 1)
+    previewImages.value = [prevImg, ...previewImages.value.slice(0, previewWindowSize.value - 1)]
+    previewStartIndex.value = start - 1
+}
+
+const onPreviewScroll = (e) => {
+    const el = e.target
+    const threshold = 100
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - threshold) {
+        shiftWindowDown()
+    } else if (el.scrollTop <= threshold) {
+        shiftWindowUp()
+    }
+}
+
+const closePreview = () => {
+    showPreview.value = false
+}
 
 // --- Breadcrumbs ---
 const breadcrumbs = computed(() => {
@@ -627,6 +728,12 @@ watch(currentPath, (newPath) => {
     
     // Sync menu tree
     syncMenuExpansion(newPath)
+    
+    showPreview.value = false
+    loadedPages.value = new Set()
+    pageImages.value = {}
+    previewImages.value = []
+    previewStartIndex.value = 0
 })
 
 watch(pageSize, () => {
@@ -756,11 +863,18 @@ const setTheme = (theme) => {
 onMounted(() => {
     fetchMenus()
     fetchSettings()
+    window.addEventListener('keydown', (e) => {
+        if (!showPreview.value) return
+        if (e.key === 'ArrowDown') shiftWindowDown()
+        if (e.key === 'ArrowUp') shiftWindowUp()
+        if (e.key === 'Escape') closePreview()
+    })
 })
 
 onUnmounted(() => {
     window.removeEventListener('mousemove', onResize)
     window.removeEventListener('mouseup', stopResize)
+    window.removeEventListener('keydown', () => {})
 })
 </script>
 
@@ -1471,6 +1585,49 @@ onUnmounted(() => {
     background: #5a3030;
     color: #aaa;
     cursor: not-allowed;
+}
+
+/* Preview */
+.preview-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1500;
+}
+.preview-vertical {
+    width: 90vw;
+    max-width: 1200px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #fff;
+    padding: 8px 0;
+}
+.preview-count { opacity: 0.8; }
+.preview-scroll {
+    flex: 1;
+    overflow-y: auto;
+}
+.preview-list-item {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 12px 0;
+}
+.preview-list-img {
+    max-width: 80vw;
+    max-height: 70vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
 }
 
 /* Scrollbar styling */
