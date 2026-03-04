@@ -59,12 +59,12 @@
             <label class="toggle-label" style="margin-left: 10px;">
                 <input type="checkbox" v-model="showImageNames"> 显示文件名
             </label>
-            <button class="icon-btn" @click="refreshContent" v-if="currentPath" title="刷新">🔄</button>
+            <button class="icon-btn" @click="refreshContent" v-if="isPathDefined" title="刷新">🔄</button>
         </div>
       </div>
 
       <draggable 
-        v-if="currentPath"
+        v-if="isPathDefined"
         v-model="folderContent.folders" 
         :group="{ name: 'folder', pull: 'clone', put: false }"
         item-key="path"
@@ -289,6 +289,7 @@ const showImageNames = ref(false)
 const settings = ref({})
 const sidebarWidth = ref(300) 
 const currentTheme = ref('dark-theme')
+const isPathDefined = computed(() => currentPath.value !== undefined && currentPath.value !== null)
 
 // Pagination
 const pageSize = ref(50)
@@ -873,6 +874,7 @@ const setTheme = (theme) => {
 onMounted(() => {
     fetchMenus()
     fetchSettings()
+    fetchFolderContent(currentPath.value)
     window.addEventListener('keydown', (e) => {
         if (!showPreview.value) return
         if (e.key === 'ArrowDown') shiftWindowDown()
