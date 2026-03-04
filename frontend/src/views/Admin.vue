@@ -262,7 +262,7 @@
                 <button class="close-btn" @click="closePreview">×</button>
             </div>
             <div class="preview-scroll" ref="previewScrollRef" @scroll="onPreviewScroll">
-                <div v-for="img in previewImages" :key="img?.relativePath" class="preview-list-item">
+                <div v-for="(img, i) in previewImages" :key="img?.relativePath || i" class="preview-list-item" :ref="el => setPreviewItemRef(el, i)">
                     <img v-if="img" :src="getImageUrl(img.relativePath)" class="preview-list-img" />
                 </div>
             </div>
@@ -273,7 +273,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed, onUnmounted } from 'vue'
+import { ref, onMounted, watch, computed, onUnmounted, nextTick } from 'vue'
 import draggable from 'vuedraggable'
 import AdminMenuTree from '../components/AdminMenuTree.vue'
 import axios from 'axios'
@@ -304,6 +304,11 @@ const previewWindowSize = ref(5)
 const previewStartIndex = ref(0)
 const previewImages = ref([])
 const previewScrollRef = ref(null)
+const previewItemRefs = ref([])
+const setPreviewItemRef = (el, i) => {
+    if (!el) return
+    previewItemRefs.value[i] = el
+}
 
 // Context Menu
 const contextMenu = ref({ visible: false, x: 0, y: 0, target: null, type: null })
@@ -403,7 +408,10 @@ const openPreview = async (localIndex) => {
     const start = Math.max(0, absIndex - Math.floor(previewWindowSize.value / 2))
     await fillPreviewWindow(start)
     showPreview.value = true
-    if (previewScrollRef.value) previewScrollRef.value.scrollTop = 0
+    const offset = absIndex - start
+    await nextTick()
+    const targetEl = previewItemRefs.value[offset]
+    if (targetEl) targetEl.scrollIntoView({ behavior: 'auto', block: 'center' })
 }
 
 const shiftWindowDown = async () => {
@@ -434,6 +442,7 @@ const onPreviewScroll = (e) => {
 
 const closePreview = () => {
     showPreview.value = false
+    previewItemRefs.value = []
 }
 
 // --- Breadcrumbs ---
@@ -734,6 +743,7 @@ watch(currentPath, (newPath) => {
     pageImages.value = {}
     previewImages.value = []
     previewStartIndex.value = 0
+    previewItemRefs.value = []
 })
 
 watch(pageSize, () => {
