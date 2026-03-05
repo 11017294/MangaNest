@@ -488,7 +488,13 @@ app.get('/api/settings', async (req, res) => {
     try {
         const settings = await Setting.findAll();
         const settingsMap = {};
-        settings.forEach(s => settingsMap[s.key] = s.value);
+        settings.forEach(s => {
+            let val = s.value;
+            if (typeof val === 'string') {
+                try { val = JSON.parse(val); } catch (_) {}
+            }
+            settingsMap[s.key] = val;
+        });
         res.json(settingsMap);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch settings' });
@@ -498,12 +504,13 @@ app.get('/api/settings', async (req, res) => {
 app.post('/api/settings', async (req, res) => {
     try {
         const { key, value } = req.body;
+        const stringified = typeof value === 'string' ? value : JSON.stringify(value);
         const [setting, created] = await Setting.findOrCreate({
             where: { key },
-            defaults: { value }
+            defaults: { value: stringified }
         });
         if (!created) {
-            setting.value = value;
+            setting.value = stringified;
             await setting.save();
         }
         res.json({ success: true });

@@ -59,7 +59,6 @@
             <label class="toggle-label" style="margin-left: 10px;">
                 <input type="checkbox" v-model="showImageNames"> 显示文件名
             </label>
-            <button class="icon-btn" @click="refreshContent" v-if="isPathDefined" title="刷新">🔄</button>
         </div>
       </div>
 
@@ -70,6 +69,8 @@
         item-key="path"
         class="folder-grid"
         ghost-class="ghost-folder"
+        :filter="'.no-drag'"
+        :preventOnFilter="false"
         @contextmenu.prevent
       >
         <template #item="{ element: folder }">
@@ -96,10 +97,12 @@
                 </div>
                 <input
                     v-else-if="isEditing('folder', folder.path)"
-                    class="rename-input title-input"
+                    class="rename-input title-input no-drag"
                     v-model="renameEdit.name"
                     @keyup.enter="confirmInlineRename"
                     @blur="confirmInlineRename"
+                    @mousedown.stop
+                    @touchstart.stop
                 />
             </div>
         </template>
@@ -125,10 +128,12 @@
                     </div>
                     <input
                         v-else-if="isEditing('image', img.relativePath)"
-                        class="rename-input title-input"
+                    class="rename-input title-input no-drag"
                         v-model="renameEdit.name"
                         @keyup.enter="confirmInlineRename"
                         @blur="confirmInlineRename"
+                    @mousedown.stop
+                    @touchstart.stop
                     />
                 </div>
             </template>
@@ -241,6 +246,19 @@
                     <p class="setting-desc">默认进入文件夹时是否显示图片。</p>
                 </div>
                 <div class="setting-item">
+                    <label>文件夹默认显示文件名</label>
+                    <div class="toggle-switch">
+                        <input 
+                            type="checkbox" 
+                            id="setting-show-image-names" 
+                            v-model="settings.showImageNamesInFolder" 
+                            @change="updateSettings('showImageNamesInFolder', settings.showImageNamesInFolder)"
+                        >
+                        <label for="setting-show-image-names"></label>
+                    </div>
+                    <p class="setting-desc">默认进入文件夹时是否显示文件名。</p>
+                </div>
+                <div class="setting-item">
                     <label>每页图片数量</label>
                     <input 
                         type="number" 
@@ -334,12 +352,28 @@ const confirmInlineRename = async () => {
     }
     try {
         const isFolder = type === 'folder'
+        let prevCover = null
+        if (isFolder) {
+            const targetFolder = folderContent.value.folders.find(f => f.path === key)
+            prevCover = targetFolder?.coverImage || null
+        }
         const res = await axios.post(`${API_BASE}/file/rename`, {
             oldPath: key,
             newName: name.trim()
         })
         if (res.data.success) {
             message.success('重命名成功')
+            if (isFolder && prevCover) {
+                const parent = key.split('/').slice(0, -1).join('/')
+                const newPath = parent ? `${parent}/${name.trim()}` : name.trim()
+                const newCoverPath = prevCover.replace(key, newPath)
+                try {
+                    await axios.post(`${API_BASE}/folder/cover`, {
+                        dir: newPath,
+                        imagePath: newCoverPath
+                    })
+                } catch (e) {}
+            }
             refreshContent()
             if (isFolder) fetchMenus()
         }
@@ -732,8 +766,6 @@ const navigateTo = (path) => {
 watch(currentPath, (newPath) => {
     // Reset state on nav
     currentPage.value = 1
-    // Sync showImages with default setting ONLY on nav change
-    showImages.value = !!settings.value.showImagesInFolder
     fetchFolderContent(newPath)
     
     // Sync menu tree
@@ -839,16 +871,20 @@ const setCover = async (img) => {
 const fetchSettings = async () => {
     try {
         const res = await axios.get(`${API_BASE}/settings`)
-        settings.value = res.data
-        // Initial load
-        if(settings.value.showImagesInFolder !== undefined) {
-            // Do NOT set showImages here if we want to respect current session? 
-            // Actually usually on first load we want to respect default.
-            // But user said "don't sync UI toggle to DB".
-            // So: UI toggle starts as DB value, but changing UI toggle doesn't change DB.
-            // DB value is changed in Settings modal.
-            // Here we just init DB value cache.
-            // On nav change (watch currentPath), we reset showImages to settings default.
+        const parseVal = (v) => {
+            if (typeof v === 'string') {
+                try { return JSON.parse(v) } catch (_) { return v }
+            }
+            return v
+        }
+        const incoming = res.data || {}
+        // Normalize types from backend
+        settings.value = Object.fromEntries(Object.entries(incoming).map(([k, v]) => [k, parseVal(v)]))
+        if (settings.value.showImagesInFolder !== undefined) {
+            showImages.value = !!settings.value.showImagesInFolder
+        }
+        if (settings.value.showImageNamesInFolder !== undefined) {
+            showImageNames.value = !!settings.value.showImageNamesInFolder
         }
         if(settings.value.theme) {
             currentTheme.value = settings.value.theme

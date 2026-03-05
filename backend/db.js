@@ -76,13 +76,32 @@ export const initDB = async () => {
         try { await qi.removeColumn('folder_metadata', 'updatedAt') } catch (_) {}
       }
     }
+    // Normalize legacy columns on settings table to avoid NOT NULL constraints
+    try {
+      const settingsSchema = await qi.describeTable('settings')
+      if (settingsSchema.createdAt) {
+        try {
+          await qi.changeColumn('settings', 'createdAt', { type: DataTypes.DATE, allowNull: true })
+        } catch (e) {
+          try { await qi.removeColumn('settings', 'createdAt') } catch (_) {}
+        }
+      }
+      if (settingsSchema.updatedAt) {
+        try {
+          await qi.changeColumn('settings', 'updatedAt', { type: DataTypes.DATE, allowNull: true })
+        } catch (e) {
+          try { await qi.removeColumn('settings', 'updatedAt') } catch (_) {}
+        }
+      }
+    } catch (_) {}
   } catch (e) {}
 
   // 初始化一些缺省设置（可选）
   const defaults = [
     { key: 'theme', value: JSON.stringify('dark-theme') },
     { key: 'pageSize', value: JSON.stringify(50) },
-    { key: 'showImagesInFolder', value: JSON.stringify(false) }
+    { key: 'showImagesInFolder', value: JSON.stringify(false) },
+    { key: 'showImageNamesInFolder', value: JSON.stringify(false) }
   ]
   for (const item of defaults) {
     const existing = await Setting.findByPk(item.key)
