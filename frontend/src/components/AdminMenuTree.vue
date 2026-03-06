@@ -14,6 +14,7 @@
       <div class="menu-item-wrapper">
         <div 
             class="menu-item" 
+            :ref="el => { if (currentId === element.id) setItemRef(el) }"
             :class="{ active: currentId === element.id }" 
             :title="element.name + (element.path ? ` (${element.path})` : '')"
             @click.stop="$emit('select', element)"
@@ -42,6 +43,7 @@
                 :current-id="currentId"
                 :parent-id="element.id"
                 :expanded-state="expandedState"
+                :show="show"
                 @select="$emit('select', $event)"
                 @edit="$emit('edit', $event)"
                 @delete="$emit('delete', $event)"
@@ -91,10 +93,46 @@ const props = defineProps({
   expandedState: {
     type: Object,
     default: () => ({})
+  },
+  show: {
+    type: Boolean,
+    default: true
   }
 })
 
 const emit = defineEmits(['select', 'edit', 'delete', 'change'])
+
+import { watch, nextTick } from 'vue'
+
+const activeItemRef = ref(null)
+
+const setItemRef = (el) => {
+    if (el) {
+        activeItemRef.value = el
+    }
+}
+
+const scrollToActive = () => {
+    if (activeItemRef.value) {
+        activeItemRef.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+}
+
+watch(() => props.show, (newVal) => {
+    if (newVal) {
+        nextTick(() => {
+            scrollToActive()
+        })
+    }
+}, { immediate: true })
+
+watch(() => props.currentId, (newVal) => {
+    if (newVal) {
+        nextTick(() => {
+            scrollToActive()
+        })
+    }
+})
 
 const isExpanded = (id) => {
     return !!props.expandedState[id]

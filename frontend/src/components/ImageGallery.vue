@@ -12,15 +12,24 @@
         :class="{ hide: !showNav }"
     >
       <div class="nav-header">
-        <span>图片分类</span>
-        <button @click="toggleNav">✕</button>
+        <div class="nav-title-search">
+            <span>图片分类</span>
+            <input 
+                type="text" 
+                v-model="menuSearchText" 
+                placeholder="搜索目录..." 
+                class="menu-search-input"
+            />
+        </div>
+        <button @click="toggleNav" class="close-nav-btn">✕</button>
       </div>
 
       <div class="nav-content">
         <DirectoryTree
-            :tree-data="treeData"
+            :tree-data="filteredTreeData"
             :current-directory="currentDirectory"
             :expanded-states="expandedStates"
+            :show-nav="showNav"
             @node-click="switchDirectory"
         />
       </div>
@@ -80,7 +89,38 @@ import DirectoryTree from './DirectoryTree.vue'
 /* ===================== 基础状态 ===================== */
 
 const treeData = ref([])
+const menuSearchText = ref('')
 const currentDirectoryImages = ref([])
+
+const filteredTreeData = computed(() => {
+    if (!menuSearchText.value) return treeData.value
+    const search = menuSearchText.value.toLowerCase()
+    
+    const filterNode = (node) => {
+        const matches = node.name.toLowerCase().includes(search)
+        let filteredChildren = []
+        if (node.children) {
+            filteredChildren = node.children
+                .map(filterNode)
+                .filter(child => child !== null)
+        }
+        
+        if (matches || filteredChildren.length > 0) {
+            // Auto expand matched nodes
+            if (search) expandedStates[node.path] = true
+            return {
+                ...node,
+                children: filteredChildren
+            }
+        }
+        return null
+    }
+    
+    return treeData.value
+        .map(filterNode)
+        .filter(node => node !== null)
+})
+
 const displayedImages = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -289,8 +329,44 @@ onUnmounted(()=> observer?.disconnect())
 .nav-header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   padding: 12px;
   border-bottom: 1px solid #333;
+  color: #fff;
+}
+
+.nav-title-search {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.menu-search-input {
+  width: 90%;
+  padding: 6px 10px;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.menu-search-input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.close-nav-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.close-nav-btn:hover {
   color: #fff;
 }
 

@@ -8,6 +8,7 @@
       <!-- 目录项 -->
       <div
           class="tree-item"
+          :ref="el => { if (currentDirectory === node.path) setItemRef(el) }"
           :class="{
           'has-children': node.children && node.children.length > 0,
           'expanded': isExpanded(node.path),
@@ -47,6 +48,7 @@
               :current-directory="currentDirectory"
               :level="level + 1"
               :expanded-states="expandedStates"
+              :show-nav="showNav"
               @node-click="handleChildNodeClick"
           />
         </div>
@@ -72,10 +74,38 @@ const props = defineProps({
   expandedStates: {
     type: Object,
     default: () => ({})
+  },
+  showNav: {
+    type: Boolean,
+    default: false
   }
 })
 
 const emit = defineEmits(['node-click'])
+
+import { ref, watch, nextTick } from 'vue'
+
+const activeItemRef = ref(null)
+
+const setItemRef = (el) => {
+  if (el) {
+    activeItemRef.value = el
+  }
+}
+
+const scrollToActive = () => {
+  if (activeItemRef.value) {
+    activeItemRef.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+watch(() => props.showNav, (newVal) => {
+  if (newVal) {
+    nextTick(() => {
+      scrollToActive()
+    })
+  }
+}, { immediate: true })
 
 // 处理子节点点击事件
 const handleChildNodeClick = (path) => {

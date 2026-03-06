@@ -9,9 +9,17 @@
           <button @click="addRootMenu" title="新增根菜单">➕</button>
         </div>
       </div>
+      <div class="sidebar-search">
+        <input 
+            type="text" 
+            v-model="menuSearchText" 
+            placeholder="搜索菜单..." 
+            class="search-input"
+        />
+      </div>
       <div class="menu-tree-container">
          <AdminMenuTree 
-            :list="menus" 
+            :list="filteredMenus" 
             :current-id="currentMenuId"
             :parent-id="null"
             :expanded-state="menuExpandedState"
@@ -299,7 +307,38 @@ import message from '../plugins/message'
 
 // State
 const menus = ref([])
+const menuSearchText = ref('')
 const currentMenuId = ref(null)
+
+const filteredMenus = computed(() => {
+    if (!menuSearchText.value) return menus.value
+    const search = menuSearchText.value.toLowerCase()
+    
+    const filterNode = (node) => {
+        const matches = node.name.toLowerCase().includes(search)
+        let filteredChildren = []
+        if (node.children) {
+            filteredChildren = node.children
+                .map(filterNode)
+                .filter(child => child !== null)
+        }
+        
+        if (matches || filteredChildren.length > 0) {
+            // Auto expand matched nodes and their parents
+            if (search) menuExpandedState.value[node.id] = true
+            return {
+                ...node,
+                children: filteredChildren
+            }
+        }
+        return null
+    }
+    
+    return menus.value
+        .map(filterNode)
+        .filter(node => node !== null)
+})
+
 const currentPath = ref('')
 const folderContent = ref({ folders: [], images: [], metadata: {} })
 const showImages = ref(false) 
@@ -1031,11 +1070,31 @@ onUnmounted(() => {
   opacity: 1;
 }
 
+.sidebar-search {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.search-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-size: 13px;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .menu-tree-container {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 10px;
+  padding-top: 8px;
 }
 
 .sidebar-footer {
