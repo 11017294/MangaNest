@@ -395,7 +395,12 @@ const deleteButtonDisabled = ref(true)
 const deleteTimer = ref(2)
 let timerInterval = null
 
-const API_BASE = 'http://localhost:3001/api'
+const getBaseUrl = () => {
+    const { protocol, hostname } = window.location
+    return `${protocol}//${hostname}:3001`
+}
+
+const API_BASE = `${getBaseUrl()}/api`
 
 const getImageUrl = (path) => `${API_BASE}/image/${encodeURIComponent(path)}`
 
