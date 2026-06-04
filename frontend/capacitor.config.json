@@ -1,0 +1,11 @@
+{
+  "appId": "local.imagebrowser.manga",
+  "appName": "Manga Shelf",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#fff7fb"
+  }
+}

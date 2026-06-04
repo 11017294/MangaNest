@@ -1,110 +1,121 @@
-# 图片浏览器项目 - 系统功能与需求说明
+# 漫栖 MangaNest - 系统功能与需求说明
 
 ## 概览
 
-本文件汇总系统功能、技术栈、项目结构与接口要点，便于快速理解系统。
+漫栖 MangaNest 是个人本地漫画阅读与管理系统。项目采用一个后端、两个前端：
+
+- `backend`：Express + Sequelize + SQLite，负责漫画索引、图片读取、阅读记录、分类和文件管理接口。
+- `frontend`：漫画阅读端，面向浏览器访问，后续可通过 Capacitor 打包 Android APK。
+- `frontend-admin`：漫画管理端，面向浏览器访问，用于维护漫画库、目录、封面、分类和索引。
 
 ## 功能特性
 
-- 图片浏览：以目录树结构浏览图片。
-- 后台管理：
-  - 菜单管理：支持拖拽排序菜单，支持从现有目录结构一键生成菜单。
-  - 文件夹管理：重命名、删除（带安全检查和确认延迟）、移动文件夹（拖拽至左侧菜单）、切换图片显示。
-  - 封面设置：右键点击图片可将其设置为当前文件夹的封面。
+阅读端：
+
+- 首页漫画列表。
+- 书架收藏与历史记录。
+- 排行榜与分类浏览。
+- 漫画详情、章节列表和继续阅读。
+- 连续纵向阅读图片。
+- 自动保存阅读进度。
+- 夜间模式与图片加载设置。
+
+管理端：
+
+- 设置漫画库根目录。
+- 扫描并重建漫画索引。
+- 浏览漫画库真实目录。
+- 重命名目录和图片文件。
+- 拖拽真实移动目录。
+- 删除目录和图片文件。
+- 图片预览与封面设置。
+- 分类新增、重命名、删除。
+- 给漫画分配分类。
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、vue-router、vuedraggable
-- 后端：Node.js、Express、CORS
-- 数据库：Sequelize（SQLite）
+- 后端：Node.js、Express、Sequelize、SQLite。
+- 阅读端：Vue 3、Vite、vue-router、Axios、Capacitor。
+- 管理端：Vue 3、Vite、vuedraggable。
+- 测试：Node.js `node --test`。
 
 ## 项目结构
 
-- 根目录
-  - server.js：后端服务与 REST API
-  - db.js：Sequelize 初始化与模型定义
-  - database.sqlite：SQLite 数据库文件（自动生成）
-  - vite.config.js：Vite 配置（dev 端口 3000）
-  - start_services.bat / stop_services.bat：一键启动/停止前后端
-- src/
-  - main.js：应用入口
-  - App.vue：根组件（承载路由）
-  - router/index.js：路由定义（/ 与 /admin）
-  - components/
-    - ImageGallery.vue：图片浏览页组件（首页）
-    - DirectoryTree.vue：目录树组件（复用在首页导航）
-    - AdminMenuTree.vue：管理页左侧菜单树组件（支持拖拽）
-    - ToastMessage.vue：消息组件（预留）
-  - views/
-    - Admin.vue：后台管理页
-  - assets/、public/：静态资源
-  - style.css、index.html：样式与页面模板
+```text
+MangaNest/
+  backend/            后端服务与数据库模型
+  frontend/           漫画阅读端
+  frontend-admin/     漫画管理端
+  test/               后端与前端工具测试
+  docs/               规划与说明文档
+  database.sqlite     本地 SQLite 数据库，自动生成，不提交
+```
 
-## 功能详解
+## 运行入口
 
-- 图片浏览页（/）
-  - 左侧可收起的目录导航，使用保存的菜单树展示目录结构。
-  - 选择目录后右侧一次加载 30 张，靠近底部自动继续加载（懒加载与无限滚动）。
-  - 图片按文件名自然排序；加载失败的图片自动隐藏。
-  - 支持快捷按钮收起/展开目录面板。
-- 后台管理页（/admin）
-  - 左侧菜单管理
-    - 显示为树结构，支持拖拽排序、拖入子级。
-    - 支持「新增根菜单」「删除」「重命名」。
-    - 支持「重新扫描目录」按当前磁盘目录生成菜单树。
-  - 右侧内容区
-    - 上方面包屑定位当前路径，按钮可控制显示图片、显示文件名、手动刷新。
-    - 文件夹以卡片形式展示，若已设置封面则显示封面图。
-    - 图片支持分页（每页数量可在设置中调整），名称按需显示。
-  - 文件拖拽移动
-    - 可将右侧文件夹拖动到左侧某个菜单项，实现磁盘层级移动；同时后端自动同步更新菜单路径。
-  - 删除确认
-    - 删除文件夹前预统计子文件与文件夹数量；删除按钮带倒计时以防误操作。
-  - 设置面板
-    - 主题切换（深色/浅色）。
-    - 每页图片数量。
-    - 进入文件夹时是否默认显示图片。
+后端：
 
-### 右键菜单说明
+```powershell
+cd D:\item\MangaNest\backend
+npm install
+npm run server
+```
 
-- 在文件夹上右键：
-  - 重命名
-  - 删除
-- 在图片上右键：
-  - 重命名
-  - 删除
-  - 设置为封面（将该图设为当前文件夹封面）
-- 在空白区域右键：
-  - 批量增加前缀：为当前文件夹内所有图片文件名批量加上指定前缀
+阅读端：
 
-## 后端 API 概览
+```powershell
+cd D:\item\MangaNest\frontend
+npm install
+npm run dev -- --host 0.0.0.0
+```
 
-- 菜单
-  - GET /api/menus：获取菜单树
-  - POST /api/menus：新增菜单项
-  - PUT /api/menus/:id：更新菜单项（名称、父级、顺序、路径）
-  - DELETE /api/menus/:id：删除菜单项
-  - POST /api/menus/scan：扫描磁盘目录生成菜单树
-- 目录与文件
-  - GET /api/folder-content?dir=xxx&page=&limit=：列出目录内容（文件夹与分页后的图片）
-  - POST /api/file/rename：重命名文件/文件夹（文件夹会同步更新相关菜单路径）
-  - POST /api/folder/move：移动文件夹到新的父目录（同步更新菜单路径）
-  - GET /api/folder/stats?dir=xxx：删除前统计目录内文件与子文件夹
-  - DELETE /api/folder?dir=xxx：删除目录（禁止删除根目录）
-  - DELETE /api/file?path=xxx：删除文件
-  - POST /api/folder/batch-prefix：为目录下图片批量添加文件名前缀
-  - POST /api/folder/cover：设置目录封面
-  - GET /api/image/:relativePath：按相对路径返回图片文件
-  - GET /api/images?dir=xxx：返回目录下图片清单
-- 设置
-  - GET /api/settings：获取设置
-  - POST /api/settings：保存设置项（主题、每页数量、默认是否显示图片等）
+管理端：
 
-## 数据与路径
+```powershell
+cd D:\item\MangaNest\frontend-admin
+npm install
+npm run dev -- --host 0.0.0.0
+```
 
-- 图片根目录：D:\DataStorage\open（可在 server.js 中修改 IMAGE_DIR）
-- 数据库存储：
-  - 菜单表 menus：树结构（id、name、path、parentId、order）
-  - 设置表 settings：键值对（JSON 值）
-  - 文件夹元数据表 folder_metadata：封面图、备注等
+默认地址：
 
+- 阅读端：http://localhost:3000/
+- 管理端：http://localhost:3002/
+- 后端：http://localhost:3001/
+
+## 漫画库结构
+
+推荐结构：
+
+```text
+漫画库/
+  漫画A/
+    cover.jpg
+    第001话/
+      001.webp
+      002.webp
+  漫画B/
+    001.webp
+    002.webp
+```
+
+漫画库根目录下的每个一级子目录会识别为一部漫画。漫画目录下直接放图片时，会识别为单章节漫画。
+
+## 提交规则
+
+应提交：
+
+- 源码、测试、文档。
+- 各子项目 `package-lock.json`。
+- Capacitor Android 工程源码和 Gradle wrapper。
+
+不应提交：
+
+- `node_modules/`
+- `dist/`
+- `build/`
+- `.gradle/`
+- `.idea/`
+- `.vscode/`
+- `database.sqlite`
+- 日志、临时验证脚本、本机配置文件。

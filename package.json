@@ -1,0 +1,11 @@
+{
+  "name": "manganest",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/**/*.test.mjs",
+    "build:reader": "npm run build --prefix frontend",
+    "build:admin": "npm run build --prefix frontend-admin"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "name": "image-hub-backend",
+  "name": "manganest-backend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,9 +7,10 @@
     "server": "node server.js"
   },
   "dependencies": {
-    "sequelize": "^6.37.7",
-    "sqlite3": "^5.1.7",
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "sequelize": "^6.37.7",
+    "sqlite3": "^6.0.1",
+    "yauzl": "^3.3.2"
   }
 }

@@ -4,7 +4,22 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { sequelize, Menu, Setting, FolderMetadata, initDB } from './db.js';
+import {
+    sequelize,
+    Comic,
+    Chapter,
+    Page,
+    ReadingProgress,
+    ReadingEvent,
+    Category,
+    Menu,
+    Setting,
+    FolderMetadata,
+    initDB
+} from './db.js';
+import { scanMangaLibrary } from './mangaScanner.js';
+import { readArchiveEntryBuffer } from './archiveReader.js';
+import { sortRankedComics } from './ranking.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,14 +27,184 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3001;
 
-// Initialize DB
-initDB();
-
 app.use(cors());
 app.use(express.json());
 
 // Base image directory
-const IMAGE_DIR = 'D:\\DataStorage\\open';
+const IMAGE_DIR = 'E:\\pagefile';
+
+await initDB();
+
+const parseSettingValue = (value) => {
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch { return value; }
+};
+
+const getSettingValue = async (key, fallback) => {
+    const setting = await Setting.findByPk(key);
+    return setting ? parseSettingValue(setting.value) : fallback;
+};
+
+const setSettingValue = async (key, value) => {
+    const stringified = typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value);
+    const [setting, created] = await Setting.findOrCreate({
+        where: { key },
+        defaults: { value: stringified }
+    });
+    if (!created) {
+        setting.value = stringified;
+        await setting.save();
+    }
+};
+
+const getLibraryPath = async () => {
+    return process.env.MANGA_LIBRARY_PATH || await getSettingValue('libraryPath', IMAGE_DIR);
+};
+
+const isInsideBase = (targetPath, basePath) => {
+    const resolvedTarget = path.resolve(targetPath);
+    const resolvedBase = path.resolve(basePath);
+    if (process.platform === 'win32') {
+        return resolvedTarget.toLowerCase() === resolvedBase.toLowerCase()
+            || resolvedTarget.toLowerCase().startsWith(resolvedBase.toLowerCase() + path.sep);
+    }
+    return resolvedTarget === resolvedBase || resolvedTarget.startsWith(resolvedBase + path.sep);
+};
+
+const normalizeRelativePath = (value = '') => {
+    return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+};
+
+const resolveLibraryRelativePath = async (relativePath = '') => {
+    const libraryPath = path.resolve(await getLibraryPath());
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+    const fullPath = path.resolve(libraryPath, normalizedRelativePath);
+    if (!isInsideBase(fullPath, libraryPath)) {
+        const error = new Error('Path is outside manga library');
+        error.status = 403;
+        throw error;
+    }
+    return { libraryPath, relativePath: normalizedRelativePath, fullPath };
+};
+
+const sendAdminError = (res, error, fallback = 'Operation failed') => {
+    const status = error?.status || 500;
+    if (status >= 500) console.error(fallback, error);
+    res.status(status).json({ error: error?.message || fallback });
+};
+
+const sendLibraryImage = async (relativePath, res) => {
+    const libraryPath = await getLibraryPath();
+    if (relativePath.includes('#')) {
+        const [archiveRelativePath, entryName] = relativePath.split('#');
+        const archiveFullPath = path.resolve(libraryPath, archiveRelativePath);
+        if (!isInsideBase(archiveFullPath, libraryPath)) return res.status(403).send('Forbidden');
+        if (!fs.existsSync(archiveFullPath)) return res.status(404).send('File not found');
+        const buffer = await readArchiveEntryBuffer(archiveFullPath, entryName);
+        res.setHeader('Content-Type', getContentType(entryName));
+        return res.send(buffer);
+    }
+
+    const fullPath = path.resolve(libraryPath, relativePath);
+
+    if (!isInsideBase(fullPath, libraryPath)) return res.status(403).send('Forbidden');
+    if (!fs.existsSync(fullPath)) return res.status(404).send('File not found');
+
+    res.sendFile(fullPath);
+};
+
+const getContentType = (filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    switch (ext) {
+        case '.jpg':
+        case '.jpeg': return 'image/jpeg';
+        case '.png': return 'image/png';
+        case '.gif': return 'image/gif';
+        case '.webp': return 'image/webp';
+        case '.bmp': return 'image/bmp';
+        default: return 'application/octet-stream';
+    }
+};
+
+const serializeComic = (comic) => {
+    const plain = comic.toJSON ? comic.toJSON() : comic;
+    return {
+        ...plain,
+        progress: plain.progress || null,
+        chapterCount: plain.chapters?.length ?? plain.chapterCount ?? 0
+    };
+};
+
+const rebuildMangaIndex = async (libraryPath) => {
+    const result = await scanMangaLibrary(libraryPath);
+    const existingComics = await Comic.findAll({
+        include: [{ model: Category, as: 'categories', required: false }]
+    });
+    const metadataBySourcePath = new Map(existingComics.map((comic) => [
+        comic.sourcePath,
+        {
+            favorite: comic.favorite,
+            readCount: comic.readCount || 0,
+            lastReadAt: comic.lastReadAt,
+            categoryNames: (comic.categories || []).map((category) => category.name)
+        }
+    ]));
+
+    await sequelize.transaction(async (transaction) => {
+        await ReadingProgress.destroy({ where: {}, transaction });
+        await sequelize.models.ComicCategory.destroy({ where: {}, transaction });
+        await Page.destroy({ where: {}, transaction });
+        await Chapter.destroy({ where: {}, transaction });
+        await Comic.destroy({ where: {}, transaction });
+
+        for (const comicData of result.comics) {
+            const comic = await Comic.create({
+                title: comicData.title,
+                coverPath: comicData.coverPath,
+                sourcePath: comicData.sourcePath,
+                sortOrder: comicData.sortOrder,
+                favorite: metadataBySourcePath.get(comicData.sourcePath)?.favorite || false,
+                readCount: metadataBySourcePath.get(comicData.sourcePath)?.readCount || 0,
+                lastReadAt: metadataBySourcePath.get(comicData.sourcePath)?.lastReadAt || null
+            }, { transaction });
+
+            const categoryNames = metadataBySourcePath.get(comicData.sourcePath)?.categoryNames || [];
+            for (const categoryName of categoryNames) {
+                const [category] = await Category.findOrCreate({
+                    where: { name: categoryName },
+                    defaults: { sortOrder: 0 },
+                    transaction
+                });
+                await comic.addCategory(category, { transaction });
+            }
+
+            for (const chapterData of comicData.chapters) {
+                const chapter = await Chapter.create({
+                    comicId: comic.id,
+                    title: chapterData.title,
+                    number: chapterData.number,
+                    path: chapterData.path,
+                    type: chapterData.type,
+                    pageCount: chapterData.pageCount,
+                    sortOrder: chapterData.sortOrder
+                }, { transaction });
+
+                const pages = chapterData.pages.map((page) => ({
+                    chapterId: chapter.id,
+                    pageIndex: page.pageIndex,
+                    name: page.name,
+                    filePath: page.filePath,
+                    width: page.width,
+                    height: page.height,
+                    fileSize: page.fileSize
+                }));
+                if (pages.length) await Page.bulkCreate(pages, { transaction });
+            }
+        }
+    });
+
+    return result;
+};
 
 // Helper: Convert flat list to tree
 const buildMenuTree = (menus, parentId = null) => {
@@ -33,6 +218,506 @@ const buildMenuTree = (menus, parentId = null) => {
             children: buildMenuTree(menus, menu.id)
         }));
 };
+
+// --- API: Manga Library ---
+
+app.get('/api/library/comics', async (req, res) => {
+    try {
+        const comics = await Comic.findAll({
+            include: [
+                { model: Chapter, as: 'chapters', attributes: ['id', 'title', 'sortOrder'], required: false },
+                { model: ReadingProgress, as: 'progress', required: false },
+                { model: Category, as: 'categories', required: false }
+            ],
+            order: [['sortOrder', 'ASC'], ['title', 'ASC']]
+        });
+        res.json(comics.map(serializeComic));
+    } catch (error) {
+        console.error('Error fetching comics:', error);
+        res.status(500).json({ error: 'Failed to fetch comics' });
+    }
+});
+
+app.get('/api/library/comics/:id', async (req, res) => {
+    try {
+        const comic = await Comic.findByPk(req.params.id, {
+            include: [
+                { model: Chapter, as: 'chapters', order: [['sortOrder', 'ASC']], required: false },
+                { model: ReadingProgress, as: 'progress', required: false },
+                { model: Category, as: 'categories', required: false }
+            ]
+        });
+        if (!comic) return res.status(404).json({ error: 'Comic not found' });
+
+        const plain = serializeComic(comic);
+        plain.chapters = (plain.chapters || []).sort((a, b) => a.sortOrder - b.sortOrder);
+        res.json(plain);
+    } catch (error) {
+        console.error('Error fetching comic:', error);
+        res.status(500).json({ error: 'Failed to fetch comic' });
+    }
+});
+
+app.get('/api/library/comics/:id/chapters', async (req, res) => {
+    try {
+        const chapters = await Chapter.findAll({
+            where: { comicId: req.params.id },
+            order: [['sortOrder', 'ASC']]
+        });
+        res.json(chapters);
+    } catch (error) {
+        console.error('Error fetching chapters:', error);
+        res.status(500).json({ error: 'Failed to fetch chapters' });
+    }
+});
+
+app.post('/api/library/scan', async (req, res) => {
+    try {
+        const libraryPath = req.body?.libraryPath || await getLibraryPath();
+        if (!fs.existsSync(libraryPath)) {
+            return res.status(404).json({ error: 'Manga library not found', libraryPath });
+        }
+
+        await setSettingValue('libraryPath', libraryPath);
+        const result = await rebuildMangaIndex(libraryPath);
+        res.json({
+            success: true,
+            libraryPath,
+            comicCount: result.comics.length,
+            chapterCount: result.comics.reduce((sum, comic) => sum + comic.chapters.length, 0),
+            pageCount: result.comics.reduce((sum, comic) => {
+                return sum + comic.chapters.reduce((chapterSum, chapter) => chapterSum + chapter.pages.length, 0);
+            }, 0)
+        });
+    } catch (error) {
+        console.error('Error scanning manga library:', error);
+        res.status(500).json({ error: 'Failed to scan manga library', detail: error?.message || String(error) });
+    }
+});
+
+app.get('/api/categories', async (req, res) => {
+    try {
+        const categories = await Category.findAll({ order: [['sortOrder', 'ASC'], ['name', 'ASC']] });
+        res.json(categories);
+    } catch (error) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({ error: 'Failed to fetch categories' });
+    }
+});
+
+app.post('/api/categories', async (req, res) => {
+    try {
+        const name = String(req.body?.name || '').trim();
+        if (!name) return res.status(400).json({ error: 'Category name is required' });
+        const count = await Category.count();
+        const [category] = await Category.findOrCreate({
+            where: { name },
+            defaults: { sortOrder: count }
+        });
+        res.json(category);
+    } catch (error) {
+        console.error('Error creating category:', error);
+        res.status(500).json({ error: 'Failed to create category' });
+    }
+});
+
+app.put('/api/categories/:id', async (req, res) => {
+    try {
+        const category = await Category.findByPk(req.params.id);
+        if (!category) return res.status(404).json({ error: 'Category not found' });
+        if (req.body.name !== undefined) category.name = String(req.body.name).trim();
+        if (req.body.sortOrder !== undefined) category.sortOrder = Number(req.body.sortOrder) || 0;
+        await category.save();
+        res.json(category);
+    } catch (error) {
+        console.error('Error updating category:', error);
+        res.status(500).json({ error: 'Failed to update category' });
+    }
+});
+
+app.delete('/api/categories/:id', async (req, res) => {
+    try {
+        const category = await Category.findByPk(req.params.id);
+        if (!category) return res.status(404).json({ error: 'Category not found' });
+        await category.destroy();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting category:', error);
+        res.status(500).json({ error: 'Failed to delete category' });
+    }
+});
+
+app.put('/api/comics/:id/favorite', async (req, res) => {
+    try {
+        const comic = await Comic.findByPk(req.params.id);
+        if (!comic) return res.status(404).json({ error: 'Comic not found' });
+        comic.favorite = !!req.body.favorite;
+        await comic.save();
+        res.json(comic);
+    } catch (error) {
+        console.error('Error updating favorite:', error);
+        res.status(500).json({ error: 'Failed to update favorite' });
+    }
+});
+
+app.put('/api/comics/:id/categories', async (req, res) => {
+    try {
+        const comic = await Comic.findByPk(req.params.id);
+        if (!comic) return res.status(404).json({ error: 'Comic not found' });
+        const categoryIds = Array.isArray(req.body.categoryIds) ? req.body.categoryIds : [];
+        const categories = await Category.findAll({ where: { id: categoryIds } });
+        await comic.setCategories(categories);
+        const updated = await Comic.findByPk(req.params.id, {
+            include: [{ model: Category, as: 'categories', required: false }]
+        });
+        res.json(updated);
+    } catch (error) {
+        console.error('Error updating comic categories:', error);
+        res.status(500).json({ error: 'Failed to update comic categories' });
+    }
+});
+
+app.put('/api/comics/:id/cover', async (req, res) => {
+    try {
+        const comic = await Comic.findByPk(req.params.id);
+        if (!comic) return res.status(404).json({ error: 'Comic not found' });
+        const coverPath = String(req.body.coverPath || '').trim();
+        if (!coverPath) return res.status(400).json({ error: 'coverPath is required' });
+        comic.coverPath = coverPath;
+        await comic.save();
+        res.json(comic);
+    } catch (error) {
+        console.error('Error updating comic cover:', error);
+        res.status(500).json({ error: 'Failed to update comic cover' });
+    }
+});
+
+app.delete('/api/comics/:id', async (req, res) => {
+    try {
+        const comic = await Comic.findByPk(req.params.id);
+        if (!comic) return res.status(404).json({ error: 'Comic not found' });
+        await ReadingProgress.destroy({ where: { comicId: comic.id } });
+        await ReadingEvent.destroy({ where: { comicId: comic.id } });
+        await sequelize.models.ComicCategory.destroy({ where: { comicId: comic.id } });
+        const chapters = await Chapter.findAll({ where: { comicId: comic.id }, attributes: ['id'] });
+        const chapterIds = chapters.map((chapter) => chapter.id);
+        if (chapterIds.length) await Page.destroy({ where: { chapterId: chapterIds } });
+        await Chapter.destroy({ where: { comicId: comic.id } });
+        await comic.destroy();
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting comic index:', error);
+        res.status(500).json({ error: 'Failed to delete comic index' });
+    }
+});
+
+// --- API: Admin File Management ---
+
+app.get('/api/admin/folders', async (req, res) => {
+    try {
+        const { libraryPath, relativePath, fullPath } = await resolveLibraryRelativePath(req.query.dir || '');
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Folder not found' });
+        const stat = fs.statSync(fullPath);
+        if (!stat.isDirectory()) return res.status(400).json({ error: 'Path is not a folder' });
+
+        const items = fs.readdirSync(fullPath, { withFileTypes: true });
+        const folders = [];
+        const images = [];
+
+        const folderPaths = items
+            .filter((item) => item.isDirectory())
+            .map((item) => path.relative(libraryPath, path.join(fullPath, item.name)).replace(/\\/g, '/'));
+        const metadataList = folderPaths.length
+            ? await FolderMetadata.findAll({ where: { path: folderPaths } })
+            : [];
+        const metadataMap = Object.fromEntries(metadataList.map((item) => [item.path, item.coverImage]));
+
+        for (const item of items) {
+            const itemPath = path.join(fullPath, item.name);
+            const itemRelativePath = path.relative(libraryPath, itemPath).replace(/\\/g, '/');
+            if (item.isDirectory()) {
+                folders.push({
+                    name: item.name,
+                    path: itemRelativePath,
+                    coverImage: metadataMap[itemRelativePath] || null
+                });
+            } else if (item.isFile()) {
+                const ext = path.extname(item.name).toLowerCase();
+                if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
+                    images.push({
+                        name: item.name,
+                        path: itemRelativePath,
+                        relativePath: itemRelativePath,
+                        size: fs.statSync(itemPath).size
+                    });
+                }
+            }
+        }
+
+        folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+        res.json({ libraryPath, currentPath: relativePath, folders, images });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to list admin folder');
+    }
+});
+
+app.post('/api/admin/files/rename', async (req, res) => {
+    try {
+        const { libraryPath, relativePath, fullPath } = await resolveLibraryRelativePath(req.body?.path || '');
+        const newName = String(req.body?.newName || '').trim();
+        if (!newName) return res.status(400).json({ error: 'New name is required' });
+        if (newName.includes('/') || newName.includes('\\')) {
+            return res.status(400).json({ error: 'New name cannot contain path separators' });
+        }
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Source path not found' });
+        if (relativePath === '') return res.status(403).json({ error: 'Cannot rename manga library root' });
+
+        const targetPath = path.resolve(path.dirname(fullPath), newName);
+        if (!isInsideBase(targetPath, libraryPath)) return res.status(403).json({ error: 'Target path is outside manga library' });
+        if (fs.existsSync(targetPath)) return res.status(400).json({ error: 'Target name already exists' });
+
+        fs.renameSync(fullPath, targetPath);
+        const newPath = path.relative(libraryPath, targetPath).replace(/\\/g, '/');
+        res.json({ success: true, path: newPath, requiresScan: true });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to rename admin file');
+    }
+});
+
+app.post('/api/admin/folders/move', async (req, res) => {
+    try {
+        const source = await resolveLibraryRelativePath(req.body?.path || '');
+        const targetParent = await resolveLibraryRelativePath(req.body?.targetParentPath || '');
+        if (!source.relativePath) return res.status(403).json({ error: 'Cannot move manga library root' });
+        if (!fs.existsSync(source.fullPath)) return res.status(404).json({ error: 'Source folder not found' });
+        if (!fs.statSync(source.fullPath).isDirectory()) return res.status(400).json({ error: 'Source path is not a folder' });
+        if (!fs.existsSync(targetParent.fullPath)) return res.status(404).json({ error: 'Target folder not found' });
+        if (!fs.statSync(targetParent.fullPath).isDirectory()) return res.status(400).json({ error: 'Target path is not a folder' });
+        if (targetParent.fullPath === source.fullPath || isInsideBase(targetParent.fullPath, source.fullPath)) {
+            return res.status(400).json({ error: 'Cannot move a folder into itself' });
+        }
+
+        const targetPath = path.resolve(targetParent.fullPath, path.basename(source.fullPath));
+        if (!isInsideBase(targetPath, source.libraryPath)) return res.status(403).json({ error: 'Target path is outside manga library' });
+        if (fs.existsSync(targetPath)) return res.status(400).json({ error: 'Target folder already exists' });
+
+        fs.renameSync(source.fullPath, targetPath);
+        const newPath = path.relative(source.libraryPath, targetPath).replace(/\\/g, '/');
+        res.json({ success: true, path: newPath, requiresScan: true });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to move admin folder');
+    }
+});
+
+app.delete('/api/admin/files', async (req, res) => {
+    try {
+        const target = await resolveLibraryRelativePath(req.query.path || '');
+        if (!target.relativePath) return res.status(403).json({ error: 'Cannot delete manga library root' });
+        if (!fs.existsSync(target.fullPath)) return res.status(404).json({ error: 'Path not found' });
+
+        const stat = fs.statSync(target.fullPath);
+        if (stat.isDirectory()) {
+            fs.rmSync(target.fullPath, { recursive: true, force: true });
+        } else {
+            fs.unlinkSync(target.fullPath);
+        }
+        res.json({ success: true, requiresScan: true });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to delete admin file');
+    }
+});
+
+app.post('/api/admin/folders/cover', async (req, res) => {
+    try {
+        const folder = await resolveLibraryRelativePath(req.body?.folderPath || '');
+        const image = await resolveLibraryRelativePath(req.body?.imagePath || '');
+        if (!fs.existsSync(folder.fullPath) || !fs.statSync(folder.fullPath).isDirectory()) {
+            return res.status(404).json({ error: 'Folder not found' });
+        }
+        if (!fs.existsSync(image.fullPath) || !fs.statSync(image.fullPath).isFile()) {
+            return res.status(404).json({ error: 'Image not found' });
+        }
+        await FolderMetadata.upsert({
+            path: folder.relativePath,
+            coverImage: image.relativePath
+        });
+        res.json({ success: true, folderPath: folder.relativePath, coverImage: image.relativePath });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to set admin folder cover');
+    }
+});
+
+app.get('/api/chapters/:id', async (req, res) => {
+    try {
+        const chapter = await Chapter.findByPk(req.params.id, {
+            include: [{
+                model: Comic,
+                as: 'comic',
+                include: [{ model: ReadingProgress, as: 'progress', required: false }]
+            }]
+        });
+        if (!chapter) return res.status(404).json({ error: 'Chapter not found' });
+        const siblings = await Chapter.findAll({
+            where: { comicId: chapter.comicId },
+            order: [['sortOrder', 'ASC']],
+            attributes: ['id', 'title', 'sortOrder']
+        });
+        const index = siblings.findIndex((item) => item.id === chapter.id);
+        const plain = chapter.toJSON();
+        plain.previousChapter = index > 0 ? siblings[index - 1] : null;
+        plain.nextChapter = index > -1 && index < siblings.length - 1 ? siblings[index + 1] : null;
+        res.json(plain);
+    } catch (error) {
+        console.error('Error fetching chapter:', error);
+        res.status(500).json({ error: 'Failed to fetch chapter' });
+    }
+});
+
+app.get('/api/chapters/:id/pages', async (req, res) => {
+    try {
+        const pages = await Page.findAll({
+            where: { chapterId: req.params.id },
+            order: [['pageIndex', 'ASC']]
+        });
+        res.json(pages);
+    } catch (error) {
+        console.error('Error fetching pages:', error);
+        res.status(500).json({ error: 'Failed to fetch pages' });
+    }
+});
+
+app.get('/api/pages/:id/image', async (req, res) => {
+    try {
+        const page = await Page.findByPk(req.params.id);
+        if (!page) return res.status(404).send('Page not found');
+        await sendLibraryImage(page.filePath, res);
+    } catch (error) {
+        console.error('Error serving page image:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.get('/api/pages/:id/thumb', async (req, res) => {
+    try {
+        const page = await Page.findByPk(req.params.id);
+        if (!page) return res.status(404).send('Page not found');
+        await sendLibraryImage(page.thumbPath || page.filePath, res);
+    } catch (error) {
+        console.error('Error serving thumbnail:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.get('/api/library/image/:imagePath(*)', async (req, res) => {
+    try {
+        await sendLibraryImage(req.params.imagePath, res);
+    } catch (error) {
+        console.error('Error serving library image:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.get('/api/progress', async (req, res) => {
+    try {
+        const where = req.query.comicId ? { comicId: req.query.comicId } : {};
+        const progress = await ReadingProgress.findAll({ where });
+        res.json(progress);
+    } catch (error) {
+        console.error('Error fetching progress:', error);
+        res.status(500).json({ error: 'Failed to fetch progress' });
+    }
+});
+
+app.put('/api/progress', async (req, res) => {
+    try {
+        const { comicId, chapterId, pageIndex = 0, scrollOffset = 0 } = req.body;
+        if (!comicId || !chapterId) return res.status(400).json({ error: 'comicId and chapterId are required' });
+
+        const [progress, created] = await ReadingProgress.findOrCreate({
+            where: { comicId },
+            defaults: { comicId, chapterId, pageIndex, scrollOffset }
+        });
+        if (!created) {
+            progress.chapterId = chapterId;
+            progress.pageIndex = pageIndex;
+            progress.scrollOffset = scrollOffset;
+            await progress.save();
+        }
+
+        res.json(progress);
+    } catch (error) {
+        console.error('Error saving progress:', error);
+        res.status(500).json({ error: 'Failed to save progress' });
+    }
+});
+
+app.get('/api/recent', async (req, res) => {
+    try {
+        const progress = await ReadingProgress.findAll({
+            include: [
+                { model: Comic, as: 'comic' },
+                { model: Chapter, as: 'chapter' }
+            ],
+            order: [['updatedAt', 'DESC']],
+            limit: 20
+        });
+        res.json(progress);
+    } catch (error) {
+        console.error('Error fetching recent:', error);
+        res.status(500).json({ error: 'Failed to fetch recent' });
+    }
+});
+
+app.post('/api/reading-events', async (req, res) => {
+    try {
+        const { comicId, chapterId, pageIndex = 0 } = req.body;
+        if (!comicId || !chapterId) return res.status(400).json({ error: 'comicId and chapterId are required' });
+
+        const comic = await Comic.findByPk(comicId);
+        const chapter = await Chapter.findByPk(chapterId);
+        if (!comic || !chapter || chapter.comicId !== Number(comicId)) {
+            return res.status(404).json({ error: 'Comic or chapter not found' });
+        }
+
+        const event = await ReadingEvent.create({
+            comicId,
+            chapterId,
+            pageIndex
+        });
+
+        comic.readCount = (comic.readCount || 0) + 1;
+        comic.lastReadAt = event.createdAt;
+        await comic.save();
+
+        res.json({
+            success: true,
+            readCount: comic.readCount,
+            lastReadAt: comic.lastReadAt
+        });
+    } catch (error) {
+        console.error('Error recording reading event:', error);
+        res.status(500).json({ error: 'Failed to record reading event' });
+    }
+});
+
+app.get('/api/ranking', async (req, res) => {
+    try {
+        const comics = await Comic.findAll({
+            include: [
+                { model: Chapter, as: 'chapters', attributes: ['id', 'title', 'sortOrder'], required: false },
+                { model: ReadingProgress, as: 'progress', required: false },
+                { model: Category, as: 'categories', required: false }
+            ]
+        });
+        const ranked = sortRankedComics(comics.map(serializeComic));
+        res.json(ranked);
+    } catch (error) {
+        console.error('Error fetching ranking:', error);
+        res.status(500).json({ error: 'Failed to fetch ranking' });
+    }
+});
 
 // --- API: Menus ---
 

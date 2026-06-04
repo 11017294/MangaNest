@@ -4,10 +4,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { fetchSettings } from './services/api'
+import { applyTheme, getStoredTheme } from './utils/theme'
 
 const isDev = import.meta.env.DEV
-const route = useRoute()
 const backendStatus = ref('checking...')
 
 const getBaseUrl = () => {
@@ -25,6 +25,10 @@ const pingBackend = async () => {
 }
 
 onMounted(() => {
+  applyTheme(getStoredTheme())
+  fetchSettings()
+    .then((settings) => applyTheme(settings.theme))
+    .catch(() => {})
   if (isDev) pingBackend()
 })
 </script>
@@ -37,12 +41,13 @@ onMounted(() => {
 }
 
 html, body {
+  min-height: 100%;
   margin: 0;
   padding: 0;
 }
 
 body {
-  background: #000;
+  min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
 }

@@ -1,33 +1,104 @@
-import path from 'path'
-import { fileURLToPath } from 'url'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Sequelize, DataTypes } from 'sequelize'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-// SQLite 文件路径（位于根目录或 backend 同级）
-const DB_PATH = path.join(__dirname, 'database.sqlite')
-let resolvedPath = DB_PATH
-try {
-  const fs = await import('fs')
-  if (!fs.existsSync(DB_PATH)) {
-    const parentPath = path.join(__dirname, '..', 'database.sqlite')
-    if (fs.existsSync(parentPath)) {
-      resolvedPath = parentPath
-    }
-  }
-} catch {}
+const PROJECT_ROOT = path.resolve(__dirname, '..')
+const DB_PATH = path.join(PROJECT_ROOT, 'database.sqlite')
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
-  storage: resolvedPath,
+  storage: DB_PATH,
   logging: false
+})
+
+export const Comic = sequelize.define('Comic', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  title: { type: DataTypes.STRING, allowNull: false },
+  author: { type: DataTypes.STRING, allowNull: true },
+  coverPath: { type: DataTypes.STRING, allowNull: true },
+  description: { type: DataTypes.TEXT, allowNull: true },
+  status: { type: DataTypes.STRING, allowNull: true },
+  favorite: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  readCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  lastReadAt: { type: DataTypes.DATE, allowNull: true },
+  sourcePath: { type: DataTypes.STRING, allowNull: false, unique: true },
+  sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+}, {
+  tableName: 'comics'
+})
+
+export const Chapter = sequelize.define('Chapter', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  comicId: { type: DataTypes.INTEGER, allowNull: false },
+  title: { type: DataTypes.STRING, allowNull: false },
+  number: { type: DataTypes.FLOAT, allowNull: true },
+  path: { type: DataTypes.STRING, allowNull: false, unique: true },
+  type: { type: DataTypes.STRING, allowNull: false, defaultValue: 'folder' },
+  pageCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+}, {
+  tableName: 'chapters'
+})
+
+export const Page = sequelize.define('Page', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  chapterId: { type: DataTypes.INTEGER, allowNull: false },
+  pageIndex: { type: DataTypes.INTEGER, allowNull: false },
+  name: { type: DataTypes.STRING, allowNull: false },
+  filePath: { type: DataTypes.STRING, allowNull: false, unique: true },
+  width: { type: DataTypes.INTEGER, allowNull: true },
+  height: { type: DataTypes.INTEGER, allowNull: true },
+  thumbPath: { type: DataTypes.STRING, allowNull: true },
+  fileSize: { type: DataTypes.INTEGER, allowNull: true },
+  hash: { type: DataTypes.STRING, allowNull: true }
+}, {
+  tableName: 'pages',
+  indexes: [
+    { fields: ['chapterId', 'pageIndex'] }
+  ]
+})
+
+export const ReadingProgress = sequelize.define('ReadingProgress', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  comicId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
+  chapterId: { type: DataTypes.INTEGER, allowNull: false },
+  pageIndex: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  scrollOffset: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+}, {
+  tableName: 'reading_progress'
+})
+
+export const ReadingEvent = sequelize.define('ReadingEvent', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  comicId: { type: DataTypes.INTEGER, allowNull: false },
+  chapterId: { type: DataTypes.INTEGER, allowNull: false },
+  pageIndex: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+}, {
+  tableName: 'reading_events'
+})
+
+export const Category = sequelize.define('Category', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING, allowNull: false, unique: true },
+  sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+}, {
+  tableName: 'categories'
+})
+
+export const ComicCategory = sequelize.define('ComicCategory', {
+  comicId: { type: DataTypes.INTEGER, allowNull: false },
+  categoryId: { type: DataTypes.INTEGER, allowNull: false }
+}, {
+  tableName: 'comic_categories',
+  timestamps: false
 })
 
 export const Menu = sequelize.define('Menu', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING, allowNull: false },
-  path: { type: DataTypes.STRING, allowNull: false }, // 相对 IMAGE_DIR 的路径（/ 分隔）
+  path: { type: DataTypes.STRING, allowNull: false },
   parentId: { type: DataTypes.INTEGER, allowNull: true },
   order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
 }, {
@@ -37,20 +108,43 @@ export const Menu = sequelize.define('Menu', {
 
 export const Setting = sequelize.define('Setting', {
   key: { type: DataTypes.STRING, primaryKey: true },
-  value: { type: DataTypes.TEXT, allowNull: false } // 存 JSON 字符串
+  value: { type: DataTypes.TEXT, allowNull: false }
 }, {
   tableName: 'settings',
   timestamps: false
 })
 
 export const FolderMetadata = sequelize.define('FolderMetadata', {
-  path: { type: DataTypes.STRING, primaryKey: true }, // 目录相对路径
-  coverImage: { type: DataTypes.STRING, allowNull: true }, // 图片相对路径
+  path: { type: DataTypes.STRING, primaryKey: true },
+  coverImage: { type: DataTypes.STRING, allowNull: true },
   note: { type: DataTypes.TEXT, allowNull: true }
 }, {
   tableName: 'folder_metadata',
   timestamps: false
 })
+
+Comic.hasMany(Chapter, { foreignKey: 'comicId', as: 'chapters', onDelete: 'CASCADE' })
+Chapter.belongsTo(Comic, { foreignKey: 'comicId', as: 'comic' })
+Chapter.hasMany(Page, { foreignKey: 'chapterId', as: 'pages', onDelete: 'CASCADE' })
+Page.belongsTo(Chapter, { foreignKey: 'chapterId', as: 'chapter' })
+Comic.hasOne(ReadingProgress, { foreignKey: 'comicId', as: 'progress', onDelete: 'CASCADE' })
+ReadingProgress.belongsTo(Comic, { foreignKey: 'comicId', as: 'comic' })
+ReadingProgress.belongsTo(Chapter, { foreignKey: 'chapterId', as: 'chapter' })
+Comic.hasMany(ReadingEvent, { foreignKey: 'comicId', as: 'readingEvents', onDelete: 'CASCADE' })
+ReadingEvent.belongsTo(Comic, { foreignKey: 'comicId', as: 'comic' })
+ReadingEvent.belongsTo(Chapter, { foreignKey: 'chapterId', as: 'chapter' })
+Comic.belongsToMany(Category, { through: ComicCategory, foreignKey: 'comicId', otherKey: 'categoryId', as: 'categories' })
+Category.belongsToMany(Comic, { through: ComicCategory, foreignKey: 'categoryId', otherKey: 'comicId', as: 'comics' })
+
+const defaultSettings = [
+  { key: 'theme', value: JSON.stringify('soft-light') },
+  { key: 'libraryPath', value: JSON.stringify('E:\\pagefile') },
+  { key: 'readerPreloadPages', value: JSON.stringify(3) },
+  { key: 'readerConcurrentLoads', value: JSON.stringify(3) },
+  { key: 'pageSize', value: JSON.stringify(50) },
+  { key: 'showImagesInFolder', value: JSON.stringify(false) },
+  { key: 'showImageNamesInFolder', value: JSON.stringify(false) }
+]
 
 export const initDB = async () => {
   await sequelize.authenticate()
@@ -58,56 +152,34 @@ export const initDB = async () => {
 
   const qi = sequelize.getQueryInterface()
   try {
-    const schema = await qi.describeTable('folder_metadata')
-    if (!schema.note) {
-      await qi.addColumn('folder_metadata', 'note', { type: DataTypes.TEXT, allowNull: true })
+    const comicSchema = await qi.describeTable('comics')
+    if (!comicSchema.favorite) {
+      await qi.addColumn('comics', 'favorite', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
+      })
     }
-    if (schema.createdAt) {
-      try {
-        await qi.changeColumn('folder_metadata', 'createdAt', { type: DataTypes.DATE, allowNull: true })
-      } catch (e) {
-        try { await qi.removeColumn('folder_metadata', 'createdAt') } catch (_) {}
-      }
+    if (!comicSchema.readCount) {
+      await qi.addColumn('comics', 'readCount', {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+      })
     }
-    if (schema.updatedAt) {
-      try {
-        await qi.changeColumn('folder_metadata', 'updatedAt', { type: DataTypes.DATE, allowNull: true })
-      } catch (e) {
-        try { await qi.removeColumn('folder_metadata', 'updatedAt') } catch (_) {}
-      }
+    if (!comicSchema.lastReadAt) {
+      await qi.addColumn('comics', 'lastReadAt', {
+        type: DataTypes.DATE,
+        allowNull: true
+      })
     }
-    // Normalize legacy columns on settings table to avoid NOT NULL constraints
-    try {
-      const settingsSchema = await qi.describeTable('settings')
-      if (settingsSchema.createdAt) {
-        try {
-          await qi.changeColumn('settings', 'createdAt', { type: DataTypes.DATE, allowNull: true })
-        } catch (e) {
-          try { await qi.removeColumn('settings', 'createdAt') } catch (_) {}
-        }
-      }
-      if (settingsSchema.updatedAt) {
-        try {
-          await qi.changeColumn('settings', 'updatedAt', { type: DataTypes.DATE, allowNull: true })
-        } catch (e) {
-          try { await qi.removeColumn('settings', 'updatedAt') } catch (_) {}
-        }
-      }
-    } catch (_) {}
-  } catch (e) {}
+  } catch {}
 
-  // 初始化一些缺省设置（可选）
-  const defaults = [
-    { key: 'theme', value: JSON.stringify('dark-theme') },
-    { key: 'pageSize', value: JSON.stringify(50) },
-    { key: 'showImagesInFolder', value: JSON.stringify(false) },
-    { key: 'showImageNamesInFolder', value: JSON.stringify(false) }
-  ]
-  for (const item of defaults) {
+  for (const item of defaultSettings) {
     const existing = await Setting.findByPk(item.key)
-    if (!existing) {
-      await Setting.create(item)
-    }
+    if (!existing) await Setting.create(item)
   }
 }
 
+export const getProjectRoot = () => PROJECT_ROOT
+export const getDatabasePath = () => DB_PATH

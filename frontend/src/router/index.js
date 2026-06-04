@@ -1,10 +1,22 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ImageGallery from '../components/ImageGallery.vue'
-import Admin from '../views/Admin.vue'
+import Home from '../views/Home.vue'
+import Shelf from '../views/Shelf.vue'
+import ComicDetail from '../views/ComicDetail.vue'
+import Reader from '../views/Reader.vue'
+import Recent from '../views/Recent.vue'
+import Settings from '../views/Settings.vue'
+import Ranking from '../views/Ranking.vue'
+import Categories from '../views/Categories.vue'
 
 const routes = [
-  { path: '/', component: ImageGallery },
-  { path: '/admin', component: Admin }
+  { path: '/', component: Home },
+  { path: '/shelf', component: Shelf },
+  { path: '/comic/:id', component: ComicDetail },
+  { path: '/reader/:chapterId', component: Reader },
+  { path: '/recent', component: Recent },
+  { path: '/settings', component: Settings },
+  { path: '/ranking', component: Ranking },
+  { path: '/categories', component: Categories }
 ]
 
 const router = createRouter({
