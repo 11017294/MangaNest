@@ -34,31 +34,6 @@
     </aside>
 
     <section class="workspace">
-      <section class="library-console">
-        <div class="library-copy">
-          <span class="eyebrow">Library Root</span>
-          <h1>漫画库根目录</h1>
-          <p>{{ folder.libraryPath || libraryPathDraft || '还没有设置漫画库根目录' }}</p>
-        </div>
-        <div class="library-controls">
-          <label>
-            <span>本机绝对路径</span>
-            <input
-              v-model="libraryPathDraft"
-              placeholder="例如 D:\\MangaLibrary"
-              @keyup.enter="saveLibraryPath"
-            />
-          </label>
-          <div class="library-actions">
-            <button class="primary-button" @click="saveLibraryPath">保存根目录</button>
-            <button class="secondary-button" :disabled="scanning" @click="scan">
-              {{ scanning ? '扫描中' : '扫描并重建索引' }}
-            </button>
-          </div>
-          <p v-if="message" class="message">{{ message }}</p>
-        </div>
-      </section>
-
       <header class="workspace-header">
         <div>
           <span class="eyebrow">File Manager</span>
@@ -68,11 +43,13 @@
           <button class="secondary-button" @click="loadAll">刷新</button>
         </div>
       </header>
+      <p v-if="message" class="message workspace-message">{{ message }}</p>
 
       <nav class="admin-menu-bar" aria-label="管理菜单">
         <button :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">文件</button>
         <button :class="{ active: activeTab === 'comics' }" @click="activeTab = 'comics'">漫画</button>
         <button :class="{ active: activeTab === 'categories' }" @click="activeTab = 'categories'">分类</button>
+        <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">设置</button>
       </nav>
 
       <section v-if="activeTab === 'files'" class="panel content-panel">
@@ -155,18 +132,19 @@
             <div class="comic-main">
               <strong>{{ comic.title }}</strong>
               <span>{{ comic.chapterCount }} 章</span>
-              <div class="category-checks">
-                <label v-for="category in categories" :key="category.id">
-                  <input
-                    type="checkbox"
-                    :checked="comicCategoryIds(comic).includes(category.id)"
-                    @change="toggleComicCategory(comic, category.id, $event.target.checked)"
-                  />
+              <div class="comic-category-summary">
+                <span
+                  v-for="category in comic.categories || []"
+                  :key="category.id"
+                  class="comic-category-chip"
+                >
                   {{ category.name }}
-                </label>
+                </span>
+                <span v-if="!comic.categories?.length" class="muted-chip">未分类</span>
               </div>
             </div>
             <div class="comic-actions">
+              <button @click="openCategoryDialog(comic)">管理分类</button>
               <button @click="openComicImages(comic, 'view')">显示图片</button>
               <button @click="openComicImages(comic, 'cover')">设置封面</button>
               <button class="danger-button" @click="removeComicIndex(comic)">删索引</button>
@@ -180,16 +158,49 @@
           <h2>分类管理</h2>
           <span>{{ categories.length }} 个</span>
         </div>
-        <form class="category-form" @submit.prevent="addCategory">
-          <input v-model="newCategoryName" placeholder="新分类名称" />
-          <button class="primary-button" type="submit">新增分类</button>
-        </form>
+        <div class="category-toolbar">
+          <button class="primary-button" @click="openCreateCategoryDialog()">新增分类</button>
+        </div>
         <div class="category-list">
-          <article v-for="category in categories" :key="category.id" class="category-row">
+          <article v-for="(category, index) in categories" :key="category.id" class="category-row">
+            <div class="sort-actions">
+              <button :disabled="index === 0" @click="moveCategory(index, -1)">上移</button>
+              <button :disabled="index === categories.length - 1" @click="moveCategory(index, 1)">下移</button>
+            </div>
             <input :value="category.name" @change="renameCategory(category, $event.target.value)" />
             <button class="danger-text" @click="removeCategory(category)">删除</button>
           </article>
         </div>
+      </section>
+
+      <section v-if="activeTab === 'settings'" class="panel content-panel settings-panel">
+        <div class="panel-title">
+          <h2>系统设置</h2>
+          <span>漫画库根目录与索引</span>
+        </div>
+        <section class="library-console settings-console">
+          <div class="library-copy">
+            <span class="eyebrow">Library Root</span>
+            <h1>漫画库根目录</h1>
+            <p>{{ folder.libraryPath || libraryPathDraft || '还没有设置漫画库根目录' }}</p>
+          </div>
+          <div class="library-controls">
+            <label>
+              <span>本机绝对路径</span>
+              <input
+                v-model="libraryPathDraft"
+                placeholder="例如 D:\\MangaLibrary"
+                @keyup.enter="saveLibraryPath"
+              />
+            </label>
+            <div class="library-actions">
+              <button class="primary-button" @click="saveLibraryPath">保存根目录</button>
+              <button class="secondary-button" :disabled="scanning" @click="scan">
+                {{ scanning ? '扫描中' : '扫描并重建索引' }}
+              </button>
+            </div>
+          </div>
+        </section>
       </section>
     </section>
 
@@ -237,6 +248,62 @@
         </div>
       </section>
     </div>
+
+    <div v-if="categoryDialog.open" class="category-dialog-overlay" @click.self="closeCategoryDialog">
+      <section class="category-dialog">
+        <header class="image-dialog-header">
+          <div>
+            <span class="eyebrow">Categories</span>
+            <h2>{{ categoryDialog.comic?.title }}</h2>
+          </div>
+          <button class="secondary-button" @click="closeCategoryDialog">关闭</button>
+        </header>
+        <div class="category-dialog-body">
+          <div v-if="!categories.length" class="empty-state compact">还没有分类，可以先新建一个。</div>
+          <div v-else class="category-dialog-list">
+            <label v-for="category in categories" :key="category.id" class="category-option">
+              <input
+                type="checkbox"
+                :checked="categoryDialog.selectedIds.includes(category.id)"
+                @change="toggleCategoryDialogSelection(category.id, $event.target.checked)"
+              />
+              <span>{{ category.name }}</span>
+            </label>
+          </div>
+          <div class="category-dialog-footer">
+            <button class="secondary-button" @click="openCreateCategoryDialog({ attachToCurrentComic: true })">新建分类</button>
+            <button class="primary-button" @click="saveAndCloseCategoryDialog">保存分类</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createCategoryDialog.open" class="category-dialog-overlay" @click.self="closeCreateCategoryDialog">
+      <section class="category-dialog create-category-dialog">
+        <header class="image-dialog-header">
+          <div>
+            <span class="eyebrow">New Category</span>
+            <h2>新增分类</h2>
+          </div>
+          <button class="secondary-button" @click="closeCreateCategoryDialog">关闭</button>
+        </header>
+        <form class="create-category-form" @submit.prevent="saveCreateCategoryDialog">
+          <label>
+            <span>分类名</span>
+            <input v-model="createCategoryDialog.name" placeholder="分类名" />
+          </label>
+          <label>
+            <span>排序号</span>
+            <input v-model.number="createCategoryDialog.sortOrder" type="number" min="0" step="1" placeholder="排序号" />
+          </label>
+          <p v-if="createCategoryDialog.error" class="form-error">{{ createCategoryDialog.error }}</p>
+          <div class="category-dialog-footer">
+            <button class="secondary-button" type="button" @click="closeCreateCategoryDialog">取消</button>
+            <button class="primary-button" type="submit">创建分类</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -273,7 +340,6 @@ const folderLoading = ref(false)
 const draggedFolder = ref(null)
 const previewImage = ref(null)
 const comicQuery = ref('')
-const newCategoryName = ref('')
 const comics = ref([])
 const categories = ref([])
 const selectedComicIds = ref([])
@@ -285,6 +351,18 @@ const comicImageDialog = reactive({
   activeChapterId: null,
   pages: [],
   pageLoading: false
+})
+const categoryDialog = reactive({
+  open: false,
+  comic: null,
+  selectedIds: []
+})
+const createCategoryDialog = reactive({
+  open: false,
+  name: '',
+  sortOrder: 0,
+  error: '',
+  attachToCurrentComic: false
 })
 const folder = reactive({
   libraryPath: '',
@@ -412,12 +490,37 @@ const setCover = async (image) => {
 
 const comicCategoryIds = (comic) => (comic.categories || []).map((category) => category.id)
 
-const toggleComicCategory = async (comic, categoryId, checked) => {
-  const ids = new Set(comicCategoryIds(comic))
+const openCategoryDialog = (comic) => {
+  categoryDialog.open = true
+  categoryDialog.comic = comic
+  categoryDialog.selectedIds = comicCategoryIds(comic)
+}
+
+const closeCategoryDialog = () => {
+  categoryDialog.open = false
+  categoryDialog.comic = null
+  categoryDialog.selectedIds = []
+}
+
+const saveCategoryDialogSelection = async () => {
+  if (!categoryDialog.comic) return
+  const updated = await setComicCategories(categoryDialog.comic.id, categoryDialog.selectedIds)
+  categoryDialog.comic.categories = updated.categories || []
+  const comic = comics.value.find((item) => item.id === categoryDialog.comic.id)
+  if (comic) comic.categories = updated.categories || []
+  message.value = '漫画分类已更新'
+}
+
+const saveAndCloseCategoryDialog = async () => {
+  await saveCategoryDialogSelection()
+  closeCategoryDialog()
+}
+
+const toggleCategoryDialogSelection = (categoryId, checked) => {
+  const ids = new Set(categoryDialog.selectedIds)
   if (checked) ids.add(categoryId)
   else ids.delete(categoryId)
-  const updated = await setComicCategories(comic.id, [...ids])
-  comic.categories = updated.categories || []
+  categoryDialog.selectedIds = [...ids]
 }
 
 const removeComicIndex = async (comic) => {
@@ -510,12 +613,73 @@ const previewPage = (page) => {
   previewImage.value = { path: page.filePath, name: page.name }
 }
 
-const addCategory = async () => {
-  const name = newCategoryName.value.trim()
-  if (!name) return
-  const category = await createCategory(name)
+const persistCategoryOrder = async () => {
+  await Promise.all(categories.value.map((category, index) => (
+    updateCategory(category.id, { sortOrder: index })
+  )))
+  categories.value = categories.value.map((category, index) => ({ ...category, sortOrder: index }))
+  message.value = '分类排序已保存'
+}
+
+const moveCategory = async (index, direction) => {
+  const targetIndex = index + direction
+  if (targetIndex < 0 || targetIndex >= categories.value.length) return
+  const nextCategories = [...categories.value]
+  const [category] = nextCategories.splice(index, 1)
+  nextCategories.splice(targetIndex, 0, category)
+  categories.value = nextCategories
+  try {
+    await persistCategoryOrder()
+  } catch (e) {
+    categories.value = await fetchCategories().catch(() => categories.value)
+    message.value = e.message || '分类排序保存失败'
+  }
+}
+
+const categoryNameExists = (name) => {
+  const normalizedName = String(name || '').trim().toLowerCase()
+  return categories.value.some((category) => category.name.trim().toLowerCase() === normalizedName)
+}
+
+const openCreateCategoryDialog = ({ attachToCurrentComic = false } = {}) => {
+  createCategoryDialog.open = true
+  createCategoryDialog.name = ''
+  createCategoryDialog.sortOrder = categories.value.length
+  createCategoryDialog.error = ''
+  createCategoryDialog.attachToCurrentComic = attachToCurrentComic
+}
+
+const closeCreateCategoryDialog = () => {
+  createCategoryDialog.open = false
+  createCategoryDialog.name = ''
+  createCategoryDialog.sortOrder = 0
+  createCategoryDialog.error = ''
+  createCategoryDialog.attachToCurrentComic = false
+}
+
+const saveCreateCategoryDialog = async () => {
+  const name = createCategoryDialog.name.trim()
+  if (!name) {
+    createCategoryDialog.error = '请输入分类名'
+    return
+  }
+  if (categoryNameExists(name)) {
+    createCategoryDialog.error = '分类名已存在'
+    return
+  }
+  const sortOrder = Number(createCategoryDialog.sortOrder)
+  const category = await createCategory(name, Number.isFinite(sortOrder) ? sortOrder : categories.value.length)
   if (!categories.value.some((item) => item.id === category.id)) categories.value.push(category)
-  newCategoryName.value = ''
+  categories.value = [...categories.value].sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder
+    return left.name.localeCompare(right.name)
+  })
+  const attachToCurrentComic = createCategoryDialog.attachToCurrentComic
+  closeCreateCategoryDialog()
+  if (attachToCurrentComic && categoryDialog.open && !categoryDialog.selectedIds.includes(category.id)) {
+    categoryDialog.selectedIds = [...categoryDialog.selectedIds, category.id]
+  }
+  message.value = '分类已创建'
 }
 
 const renameCategory = async (category, name) => {

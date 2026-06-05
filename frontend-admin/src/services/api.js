@@ -61,9 +61,9 @@ export const setComicCategories = (comicId, categoryIds) => request(`/comics/${c
 export const deleteComicIndex = (comicId) => request(`/comics/${comicId}`, { method: 'DELETE' })
 
 export const fetchCategories = () => request('/categories')
-export const createCategory = (name) => request('/categories', {
+export const createCategory = (name, sortOrder) => request('/categories', {
   method: 'POST',
-  body: JSON.stringify({ name })
+  body: JSON.stringify({ name, sortOrder })
 })
 export const updateCategory = (id, payload) => request(`/categories/${id}`, {
   method: 'PUT',

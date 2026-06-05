@@ -309,10 +309,17 @@ app.post('/api/categories', async (req, res) => {
     try {
         const name = String(req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: 'Category name is required' });
+        const existing = await Category.findOne({
+            where: sequelize.where(sequelize.fn('lower', sequelize.col('name')), name.toLowerCase())
+        });
+        if (existing) return res.status(409).json({ error: 'Category already exists' });
         const count = await Category.count();
-        const [category] = await Category.findOrCreate({
-            where: { name },
-            defaults: { sortOrder: count }
+        const sortOrder = req.body?.sortOrder === undefined
+            ? count
+            : Number(req.body.sortOrder);
+        const category = await Category.create({
+            name,
+            sortOrder: Number.isFinite(sortOrder) ? sortOrder : count
         });
         res.json(category);
     } catch (error) {
