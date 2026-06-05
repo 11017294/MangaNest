@@ -1,41 +1,35 @@
 <template>
   <main class="admin-shell" @click="closeContextMenu">
-    <AdminSidebar
-      :current-path="currentPath"
-      :folder="folder"
-      :breadcrumbs="breadcrumbs"
-      @open-folder="openFolder"
-    />
-
-    <section class="workspace">
-      <header class="workspace-header">
-        <div>
-          <span class="eyebrow">File Manager</span>
-          <h1>{{ currentPath || '漫画库根目录' }}</h1>
-        </div>
-        <div class="header-actions">
-          <button class="secondary-button" @click="loadAll">刷新</button>
-        </div>
-      </header>
-
+    <header class="admin-topbar">
       <nav class="admin-menu-bar" aria-label="管理菜单">
         <button :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">文件</button>
         <button :class="{ active: activeTab === 'comics' }" @click="activeTab = 'comics'">漫画</button>
         <button :class="{ active: activeTab === 'categories' }" @click="activeTab = 'categories'">分类</button>
         <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">设置</button>
       </nav>
+    </header>
 
-      <FileManagerPanel
-        v-if="activeTab === 'files'"
-        :folder="folder"
-        :folder-loading="folderLoading"
-        @context="openFileContextMenu"
-        @drag-start="startDragFolder"
-        @drop-folder="dropFolder"
-        @open-folder="openFolder"
-        @preview-image="openFolderImagePreview"
-        @rename="renamePath"
-      />
+    <section class="workspace">
+      <section v-if="activeTab === 'files'" class="files-workspace">
+        <AdminSidebar
+          :current-path="currentPath"
+          :folder="folder"
+          :breadcrumbs="breadcrumbs"
+          @open-folder="openFolder"
+        />
+
+        <FileManagerPanel
+          :folder="folder"
+          :folder-loading="folderLoading"
+          :breadcrumbs="breadcrumbs"
+          @context="openFileContextMenu"
+          @drag-start="startDragFolder"
+          @drop-folder="dropFolder"
+          @open-folder="openFolder"
+          @preview-image="openFolderImagePreview"
+          @rename="renamePath"
+        />
+      </section>
 
       <ComicManagerPanel
         v-if="activeTab === 'comics'"

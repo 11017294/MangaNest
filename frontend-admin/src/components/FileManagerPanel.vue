@@ -5,6 +5,20 @@
       <span>{{ folder.folders.length }} 个目录 · {{ folder.images.length }} 张图片</span>
     </div>
 
+    <nav class="file-path-breadcrumbs" aria-label="当前路径">
+      <template v-for="(crumb, index) in breadcrumbs" :key="crumb.path">
+        <button
+          v-if="index < breadcrumbs.length - 1"
+          type="button"
+          @click="$emit('open-folder', crumb.path)"
+        >
+          {{ crumb.name }}
+        </button>
+        <strong v-else>{{ crumb.name }}</strong>
+        <span v-if="index < breadcrumbs.length - 1">/</span>
+      </template>
+    </nav>
+
     <div v-if="folderLoading" class="empty-state">加载目录...</div>
     <div v-else class="file-grid">
       <article
@@ -59,6 +73,10 @@ defineProps({
   folderLoading: {
     type: Boolean,
     default: false
+  },
+  breadcrumbs: {
+    type: Array,
+    default: () => []
   }
 })
 

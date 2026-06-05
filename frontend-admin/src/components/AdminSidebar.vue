@@ -1,15 +1,6 @@
 <template>
-  <aside class="sidebar">
-    <div class="brand">
-      <strong>目录导航</strong>
-      <span>{{ currentPath || '漫画库根目录' }}</span>
-    </div>
-
+  <aside class="sidebar file-sidebar">
     <section class="panel">
-      <div class="panel-title">
-        <h2>目录</h2>
-        <button class="text-button" @click="$emit('open-folder', '')">根目录</button>
-      </div>
       <div class="breadcrumbs">
         <button
           v-for="crumb in breadcrumbs"
