@@ -73,6 +73,7 @@
             <button class="thumb folder-thumb" @click="openFolder(dir.path)">
               <img v-if="dir.coverImage" :src="imageUrl(dir.coverImage)" alt="" loading="lazy" />
               <span v-else>无图片</span>
+              <small class="type-badge" aria-label="文件夹">DIR</small>
             </button>
             <input
               :value="dir.name"
@@ -641,6 +642,22 @@ const setCover = async (image) => {
 
 const normalizedPath = (value) => String(value || '').replace(/\\/g, '/')
 
+const parentDirectoryPath = (filePath) => {
+  const normalized = normalizedPath(filePath)
+  const separatorIndex = normalized.lastIndexOf('/')
+  return separatorIndex > 0 ? normalized.slice(0, separatorIndex) : ''
+}
+
+const canSetParentFolderCover = (item, isFolder) => {
+  return isFolder && !!currentPath.value && !!item.coverImage
+}
+
+const setParentFolderCover = async (folderItem) => {
+  await setFolderCover(currentPath.value, folderItem.coverImage)
+  message.value = '上级目录封面已设置'
+  await openFolder(currentPath.value)
+}
+
 const openPreview = (image, list = []) => {
   const normalizedImagePath = normalizedPath(image?.path)
   const normalizedList = list.map((item) => ({
@@ -712,10 +729,11 @@ const openFileContextMenu = (event, item, type) => {
     {
       label: '在资源管理器中显示',
       action: async () => {
-        await revealFile(item.path)
+        await revealFile(isFolder ? item.path : parentDirectoryPath(item.path))
         message.value = '已在资源管理器中显示'
       }
     },
+    canSetParentFolderCover(item, isFolder) && { label: '设为上级目录封面', action: () => setParentFolderCover(item) },
     !isFolder && { label: '设为当前目录封面', action: () => setCover(item) },
     { label: isFolder ? '删除目录' : '删除图片', danger: true, action: () => removePath(item.path, item.name, isFolder ? 'folder' : 'file') }
   ])

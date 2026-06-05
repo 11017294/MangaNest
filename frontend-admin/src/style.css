@@ -373,6 +373,7 @@ input {
 }
 
 .thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -394,6 +395,25 @@ input {
 .folder-thumb span {
   font-size: 28px;
   font-weight: 900;
+}
+
+.type-badge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 2;
+  min-width: 32px;
+  padding: 4px 6px 3px;
+  border: 1px solid rgba(199, 255, 79, 0.42);
+  border-radius: 6px;
+  background: rgba(8, 35, 31, 0.88);
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.22);
+  color: #d7ff6a;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
 }
 
 .name-input {
