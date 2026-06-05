@@ -1,6 +1,6 @@
 <template>
   <main class="shell recent-page">
-    <button class="text-button" @click="$router.back()">返回</button>
+    <AppTopNav title="最近阅读" eyebrow="History" />
     <section class="top-panel compact-panel">
       <div>
         <p class="eyebrow">History</p>
@@ -34,6 +34,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import AppTopNav from '../components/AppTopNav.vue'
 import { fetchRecent, imageUrl } from '../services/api'
 
 const items = ref([])

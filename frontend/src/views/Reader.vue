@@ -37,8 +37,13 @@
         >
           上一章
         </RouterLink>
-        <button class="reader-pill" @click="saveCurrentProgress">保存进度</button>
-        <button class="reader-pill muted" @click="setCurrentAsCover">设封面</button>
+        <RouterLink
+          v-if="chapter?.comicId"
+          class="reader-pill"
+          :to="`/comic/${chapter.comicId}`"
+        >
+          返回漫画
+        </RouterLink>
         <RouterLink
           v-if="chapter?.nextChapter"
           class="reader-pill muted"
@@ -60,8 +65,7 @@ import {
   fetchSettings,
   pageImageUrl,
   recordReadingEvent,
-  saveProgress,
-  setComicCover
+  saveProgress
 } from '../services/api'
 import QueuedImage from '../components/QueuedImage.vue'
 import { setReaderChrome } from '../capacitor'
@@ -142,12 +146,6 @@ const saveCurrentProgress = async () => {
     pageIndex: currentPageIndex.value,
     scrollOffset: Math.round(window.scrollY)
   })
-}
-
-const setCurrentAsCover = async () => {
-  const currentPage = pages.value[currentPageIndex.value]
-  if (!chapter.value?.comicId || !currentPage) return
-  await setComicCover(chapter.value.comicId, currentPage.filePath)
 }
 
 const onScroll = () => {

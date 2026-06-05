@@ -124,14 +124,18 @@ input {
 .secondary-button,
 .row-actions button,
 .folder-nav button,
-.breadcrumbs button {
+.breadcrumbs button,
+.admin-menu-bar button,
+.chapter-sidebar button {
   padding: 8px 10px;
   background: var(--panel-strong);
   color: var(--text);
   border: 1px solid var(--line);
 }
 
-.secondary-button.active {
+.secondary-button.active,
+.admin-menu-bar button.active,
+.chapter-sidebar button.active {
   background: var(--accent);
   color: #08231f;
   border-color: transparent;
@@ -270,6 +274,19 @@ input {
   gap: 8px;
 }
 
+.admin-menu-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-menu-bar button {
+  cursor: pointer;
+  border-radius: 6px;
+  font-weight: 800;
+}
+
 .file-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -328,6 +345,36 @@ input {
   margin-bottom: 12px;
 }
 
+.bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111821;
+}
+
+.bulk-toolbar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.select-all-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.select-all-control input,
+.comic-select {
+  width: auto;
+}
+
 .comic-table,
 .category-list {
   display: grid;
@@ -336,7 +383,7 @@ input {
 
 .comic-row {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) 320px;
+  grid-template-columns: auto 72px minmax(0, 1fr) 260px;
   gap: 12px;
   align-items: start;
   padding: 12px;
@@ -345,12 +392,27 @@ input {
   background: #141b24;
 }
 
-.comic-row img {
+.comic-select {
+  margin-top: 28px;
+}
+
+.comic-cover-button {
   width: 72px;
   aspect-ratio: 3 / 4;
-  object-fit: cover;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
   border-radius: 6px;
   background: #0f151d;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.comic-cover-button img {
+  width: 72px;
+  height: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
 }
 
 .comic-main {
@@ -390,6 +452,21 @@ input {
   gap: 8px;
 }
 
+.comic-actions button {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.comic-actions .danger-button {
+  background: rgba(255, 107, 134, 0.16);
+  color: var(--danger);
+}
+
 .category-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -415,7 +492,7 @@ input {
 .preview-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 40;
   display: grid;
   place-items: center;
   padding: 34px;
@@ -439,6 +516,119 @@ input {
   cursor: pointer;
 }
 
+.image-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.image-dialog {
+  width: min(1120px, 100%);
+  height: min(760px, 92vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.image-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.image-dialog-header h2 {
+  overflow: hidden;
+  margin: 3px 0 0;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-dialog-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.chapter-sidebar {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: #0e131a;
+}
+
+.chapter-sidebar button {
+  display: grid;
+  gap: 4px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chapter-sidebar strong,
+.chapter-sidebar span,
+.dialog-page-tile span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-sidebar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dialog-pages {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.dialog-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+}
+
+.dialog-page-tile {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #141b24;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dialog-page-tile img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #0f151d;
+}
+
+.dialog-page-tile span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 980px) {
   .admin-shell {
     grid-template-columns: 1fr;
@@ -455,10 +645,20 @@ input {
   }
 
   .comic-row {
-    grid-template-columns: 60px minmax(0, 1fr);
+    grid-template-columns: auto 60px minmax(0, 1fr);
   }
 
   .comic-actions {
     grid-column: 1 / -1;
+  }
+
+  .image-dialog-body {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-sidebar {
+    max-height: 190px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 }

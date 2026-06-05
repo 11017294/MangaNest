@@ -96,6 +96,54 @@ button {
   padding: 22px 22px 76px;
 }
 
+.app-top-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.nav-back-button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.nav-back-button span {
+  transform: translateY(-1px);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.nav-title {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nav-title span {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.nav-title strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .top-panel,
 .section-band,
 .detail-hero {
@@ -135,7 +183,8 @@ button {
 }
 
 .mini-search {
-  min-width: min(360px, 46vw);
+  width: 100%;
+  box-sizing: border-box;
   padding: 11px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;

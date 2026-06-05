@@ -43,10 +43,13 @@ export const scanLibrary = (libraryPath) => request('/library/scan', {
 })
 
 export const fetchComics = () => request('/library/comics')
+export const fetchComic = (id) => request(`/library/comics/${id}`)
+export const fetchChapterPages = (id) => request(`/chapters/${id}/pages`)
 export const setComicFavorite = (comicId, favorite) => request(`/comics/${comicId}/favorite`, {
   method: 'PUT',
   body: JSON.stringify({ favorite })
 })
+export const pageImageUrl = (pageId) => `${API_BASE}/pages/${pageId}/image`
 export const setComicCover = (comicId, coverPath) => request(`/comics/${comicId}/cover`, {
   method: 'PUT',
   body: JSON.stringify({ coverPath })

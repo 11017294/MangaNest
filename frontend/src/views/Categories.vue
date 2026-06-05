@@ -1,6 +1,6 @@
 <template>
   <main class="shell app-page">
-    <button class="text-button" @click="$router.back()">返回</button>
+    <AppTopNav title="分类" eyebrow="Categories" />
     <section class="top-panel compact-panel">
       <div>
         <p class="eyebrow">Categories</p>
@@ -36,6 +36,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import AppTopNav from '../components/AppTopNav.vue'
 import ComicCard from '../components/ComicCard.vue'
 import { fetchCategories, fetchComics } from '../services/api'
 

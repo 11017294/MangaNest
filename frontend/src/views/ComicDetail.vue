@@ -1,6 +1,6 @@
 <template>
   <main class="shell detail-page">
-    <button class="text-button" @click="$router.back()">返回</button>
+    <AppTopNav title="漫画详情" eyebrow="Comic" />
 
     <section v-if="comic" class="detail-hero">
       <div class="detail-cover">
@@ -62,6 +62,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import AppTopNav from '../components/AppTopNav.vue'
 import {
   fetchComic,
   imageUrl,

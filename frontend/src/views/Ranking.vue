@@ -1,6 +1,6 @@
 <template>
   <main class="shell app-page">
-    <button class="text-button" @click="$router.back()">返回</button>
+    <AppTopNav title="排行榜" eyebrow="Ranking" />
     <section class="top-panel compact-panel">
       <div>
         <p class="eyebrow">Ranking</p>
@@ -38,6 +38,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import AppTopNav from '../components/AppTopNav.vue'
 import { fetchRanking, imageUrl } from '../services/api'
 
 const rankedComics = ref([])
