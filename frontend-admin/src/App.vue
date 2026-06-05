@@ -43,7 +43,6 @@
           <button class="secondary-button" @click="loadAll">刷新</button>
         </div>
       </header>
-      <p v-if="message" class="message workspace-message">{{ message }}</p>
 
       <nav class="admin-menu-bar" aria-label="管理菜单">
         <button :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">文件</button>
@@ -387,6 +386,20 @@
         {{ item.label }}
       </button>
     </div>
+
+    <div v-if="messages.length" class="message-stack" aria-live="polite" aria-atomic="false">
+      <button
+        v-for="item in messages"
+        :key="item.id"
+        class="message-toast"
+        :class="item.type"
+        type="button"
+        @click="removeMessage(item.id)"
+      >
+        <span class="message-toast-icon">{{ item.type === 'error' ? '!' : '✓' }}</span>
+        <span>{{ item.text }}</span>
+      </button>
+    </div>
   </main>
 </template>
 
@@ -418,7 +431,7 @@ import {
 const activeTab = ref('files')
 const currentPath = ref('')
 const libraryPathDraft = ref('')
-const message = ref('')
+const messages = ref([])
 const scanning = ref(false)
 const folderLoading = ref(false)
 const draggedFolder = ref(null)
@@ -472,6 +485,7 @@ const folder = reactive({
   folders: [],
   images: []
 })
+let nextMessageId = 0
 
 const breadcrumbs = computed(() => {
   const crumbs = [{ name: '根目录', path: '' }]
@@ -506,6 +520,23 @@ const previewPositionLabel = computed(() => {
   return `${previewIndex.value + 1} / ${previewList.value.length}`
 })
 
+const removeMessage = (id) => {
+  const target = messages.value.find((item) => item.id === id)
+  if (target?.timerId) window.clearTimeout(target.timerId)
+  messages.value = messages.value.filter((item) => item.id !== id)
+}
+
+const notify = (text, type = 'success') => {
+  const cleanText = String(text || '').trim()
+  if (!cleanText) return
+  const id = nextMessageId++
+  const timerId = window.setTimeout(() => removeMessage(id), 3200)
+  messages.value = [...messages.value.slice(-3), { id, type, text: cleanText, timerId }]
+}
+
+const notifySuccess = (text) => notify(text, 'success')
+const notifyError = (text) => notify(text, 'error')
+
 const loadSettings = async () => {
   const settings = await fetchSettings().catch(() => ({}))
   libraryPathDraft.value = settings.libraryPath || ''
@@ -520,7 +551,7 @@ const openFolder = async (path = '') => {
     folder.folders = data.folders || []
     folder.images = data.images || []
   } catch (e) {
-    message.value = e.message || '目录加载失败'
+    notifyError(e.message || '目录加载失败')
   } finally {
     folderLoading.value = false
   }
@@ -542,20 +573,23 @@ const loadAll = async () => {
 }
 
 const saveLibraryPath = async () => {
-  await updateSetting('libraryPath', libraryPathDraft.value)
-  message.value = '漫画库根目录已保存'
-  await openFolder('')
+  try {
+    await updateSetting('libraryPath', libraryPathDraft.value)
+    notifySuccess('漫画库根目录已保存')
+    await openFolder('')
+  } catch (e) {
+    notifyError(e.message || '漫画库根目录保存失败')
+  }
 }
 
 const scan = async () => {
   scanning.value = true
-  message.value = ''
   try {
     const result = await scanLibrary(libraryPathDraft.value)
-    message.value = `扫描完成：${result.comicCount} 本，${result.chapterCount} 章，${result.pageCount} 页`
+    notifySuccess(`扫描完成：${result.comicCount} 本，${result.chapterCount} 章，${result.pageCount} 页`)
     await loadAll()
   } catch (e) {
-    message.value = e.message || '扫描失败'
+    notifyError(e.message || '扫描失败')
   } finally {
     scanning.value = false
   }
@@ -564,9 +598,13 @@ const scan = async () => {
 const renamePath = async (path, newName) => {
   const cleanName = String(newName || '').trim()
   if (!cleanName) return
-  await renameFile(path, cleanName)
-  message.value = '已重命名，建议重新扫描索引'
-  await openFolder(currentPath.value)
+  try {
+    await renameFile(path, cleanName)
+    notifySuccess('已重命名，建议重新扫描索引')
+    await openFolder(currentPath.value)
+  } catch (e) {
+    notifyError(e.message || '重命名失败')
+  }
 }
 
 const startDragFolder = (dir) => {
@@ -578,8 +616,10 @@ const dropFolder = async (targetDir) => {
   if (!confirm(`将目录“${draggedFolder.value.name}”移动到“${targetDir.name}”下？`)) return
   try {
     await moveFolder(draggedFolder.value.path, targetDir.path)
-    message.value = '目录已移动，建议重新扫描索引'
+    notifySuccess('目录已移动，建议重新扫描索引')
     await openFolder(currentPath.value)
+  } catch (e) {
+    notifyError(e.message || '目录移动失败')
   } finally {
     draggedFolder.value = null
   }
@@ -623,21 +663,25 @@ const confirmDeletePath = async () => {
   const deletedPath = deleteConfirmDialog.path
   try {
     await deleteFile(deletedPath)
-    message.value = `已删除${deletedType === 'folder' ? '文件夹' : '文件'}“${deletedName}”，建议重新扫描索引`
+    notifySuccess(`已删除${deletedType === 'folder' ? '文件夹' : '文件'}“${deletedName}”，建议重新扫描索引`)
     deleteConfirmDialog.submitting = false
     closeDeleteConfirmDialog()
     if (normalizedPath(previewImage.value?.path) === normalizedPath(deletedPath)) closePreview()
     await openFolder(currentPath.value)
   } catch (e) {
     deleteConfirmDialog.submitting = false
-    message.value = e.message || '删除失败'
+    notifyError(e.message || '删除失败')
   }
 }
 
 const setCover = async (image) => {
-  await setFolderCover(currentPath.value, image.path)
-  message.value = '当前目录封面已设置'
-  await openFolder(currentPath.value)
+  try {
+    await setFolderCover(currentPath.value, image.path)
+    notifySuccess('当前目录封面已设置')
+    await openFolder(currentPath.value)
+  } catch (e) {
+    notifyError(e.message || '封面设置失败')
+  }
 }
 
 const normalizedPath = (value) => String(value || '').replace(/\\/g, '/')
@@ -653,9 +697,13 @@ const canSetParentFolderCover = (item, isFolder) => {
 }
 
 const setParentFolderCover = async (folderItem) => {
-  await setFolderCover(currentPath.value, folderItem.coverImage)
-  message.value = '上级目录封面已设置'
-  await openFolder(currentPath.value)
+  try {
+    await setFolderCover(currentPath.value, folderItem.coverImage)
+    notifySuccess('上级目录封面已设置')
+    await openFolder(currentPath.value)
+  } catch (e) {
+    notifyError(e.message || '上级目录封面设置失败')
+  }
 }
 
 const openPreview = (image, list = []) => {
@@ -716,7 +764,7 @@ const runContextAction = async (item) => {
   try {
     await item.action?.()
   } catch (e) {
-    message.value = e.message || '操作失败'
+    notifyError(e.message || '操作失败')
   }
 }
 
@@ -730,7 +778,7 @@ const openFileContextMenu = (event, item, type) => {
       label: '在资源管理器中显示',
       action: async () => {
         await revealFile(isFolder ? item.path : parentDirectoryPath(item.path))
-        message.value = '已在资源管理器中显示'
+        notifySuccess('已在资源管理器中显示')
       }
     },
     canSetParentFolderCover(item, isFolder) && { label: '设为上级目录封面', action: () => setParentFolderCover(item) },
@@ -754,17 +802,23 @@ const closeCategoryDialog = () => {
 }
 
 const saveCategoryDialogSelection = async () => {
-  if (!categoryDialog.comic) return
-  const updated = await setComicCategories(categoryDialog.comic.id, categoryDialog.selectedIds)
-  categoryDialog.comic.categories = updated.categories || []
-  const comic = comics.value.find((item) => item.id === categoryDialog.comic.id)
-  if (comic) comic.categories = updated.categories || []
-  message.value = '漫画分类已更新'
+  if (!categoryDialog.comic) return false
+  try {
+    const updated = await setComicCategories(categoryDialog.comic.id, categoryDialog.selectedIds)
+    categoryDialog.comic.categories = updated.categories || []
+    const comic = comics.value.find((item) => item.id === categoryDialog.comic.id)
+    if (comic) comic.categories = updated.categories || []
+    notifySuccess('漫画分类已更新')
+    return true
+  } catch (e) {
+    notifyError(e.message || '漫画分类更新失败')
+    return false
+  }
 }
 
 const saveAndCloseCategoryDialog = async () => {
-  await saveCategoryDialogSelection()
-  closeCategoryDialog()
+  const saved = await saveCategoryDialogSelection()
+  if (saved) closeCategoryDialog()
 }
 
 const toggleCategoryDialogSelection = (categoryId, checked) => {
@@ -776,10 +830,14 @@ const toggleCategoryDialogSelection = (categoryId, checked) => {
 
 const removeComicIndex = async (comic) => {
   if (!confirm(`只删除索引，不删除磁盘文件：${comic.title}？`)) return
-  await deleteComicIndex(comic.id)
-  comics.value = comics.value.filter((item) => item.id !== comic.id)
-  selectedComicIds.value = selectedComicIds.value.filter((id) => id !== comic.id)
-  message.value = '索引已删除'
+  try {
+    await deleteComicIndex(comic.id)
+    comics.value = comics.value.filter((item) => item.id !== comic.id)
+    selectedComicIds.value = selectedComicIds.value.filter((id) => id !== comic.id)
+    notifySuccess('索引已删除')
+  } catch (e) {
+    notifyError(e.message || '索引删除失败')
+  }
 }
 
 const openComicContextMenu = (event, comic) => {
@@ -812,10 +870,14 @@ const removeSelectedComicIndexes = async () => {
   const ids = [...selectedComicIds.value]
   if (!ids.length) return
   if (!confirm(`只删除 ${ids.length} 个漫画索引，不删除磁盘文件？`)) return
-  await Promise.all(ids.map((id) => deleteComicIndex(id)))
-  comics.value = comics.value.filter((comic) => !ids.includes(comic.id))
-  selectedComicIds.value = []
-  message.value = `已删除 ${ids.length} 个索引`
+  try {
+    await Promise.all(ids.map((id) => deleteComicIndex(id)))
+    comics.value = comics.value.filter((comic) => !ids.includes(comic.id))
+    selectedComicIds.value = []
+    notifySuccess(`已删除 ${ids.length} 个索引`)
+  } catch (e) {
+    notifyError(e.message || '批量删除索引失败')
+  }
 }
 
 const chapterContainsPath = (chapter, filePath) => {
@@ -845,7 +907,7 @@ const openComicImages = async (comic, mode = 'view') => {
     if (targetChapter) await selectDialogChapter(targetChapter)
     else comicImageDialog.pageLoading = false
   } catch (e) {
-    message.value = e.message || '漫画图片加载失败'
+    notifyError(e.message || '漫画图片加载失败')
     comicImageDialog.pageLoading = false
   }
 }
@@ -866,7 +928,7 @@ const selectDialogChapter = async (chapter) => {
   try {
     comicImageDialog.pages = await fetchChapterPages(chapter.id)
   } catch (e) {
-    message.value = e.message || '章节图片加载失败'
+    notifyError(e.message || '章节图片加载失败')
   } finally {
     comicImageDialog.pageLoading = false
   }
@@ -874,11 +936,15 @@ const selectDialogChapter = async (chapter) => {
 
 const chooseCoverPage = async (page) => {
   if (!comicImageDialog.comic) return
-  const updated = await setComicCover(comicImageDialog.comic.id, page.filePath)
-  const comic = comics.value.find((item) => item.id === updated.id)
-  if (comic) comic.coverPath = updated.coverPath
-  comicImageDialog.comic.coverPath = updated.coverPath
-  message.value = '漫画封面已更新'
+  try {
+    const updated = await setComicCover(comicImageDialog.comic.id, page.filePath)
+    const comic = comics.value.find((item) => item.id === updated.id)
+    if (comic) comic.coverPath = updated.coverPath
+    comicImageDialog.comic.coverPath = updated.coverPath
+    notifySuccess('漫画封面已更新')
+  } catch (e) {
+    notifyError(e.message || '漫画封面更新失败')
+  }
 }
 
 const previewPage = (page) => {
@@ -904,7 +970,7 @@ const persistCategoryOrder = async () => {
     updateCategory(category.id, { sortOrder: index })
   )))
   categories.value = categories.value.map((category, index) => ({ ...category, sortOrder: index }))
-  message.value = '分类排序已保存'
+  notifySuccess('分类排序已保存')
 }
 
 const moveCategory = async (index, direction) => {
@@ -918,7 +984,7 @@ const moveCategory = async (index, direction) => {
     await persistCategoryOrder()
   } catch (e) {
     categories.value = await fetchCategories().catch(() => categories.value)
-    message.value = e.message || '分类排序保存失败'
+    notifyError(e.message || '分类排序保存失败')
   }
 }
 
@@ -969,35 +1035,49 @@ const saveCreateCategoryDialog = async () => {
     createCategoryDialog.error = '分类名已存在'
     return
   }
-  const sortOrder = Number(createCategoryDialog.sortOrder)
-  const category = await createCategory(name, Number.isFinite(sortOrder) ? sortOrder : categories.value.length)
-  if (!categories.value.some((item) => item.id === category.id)) categories.value.push(category)
-  categories.value = [...categories.value].sort((left, right) => {
-    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder
-    return left.name.localeCompare(right.name)
-  })
-  const attachToCurrentComic = createCategoryDialog.attachToCurrentComic
-  closeCreateCategoryDialog()
-  if (attachToCurrentComic && categoryDialog.open && !categoryDialog.selectedIds.includes(category.id)) {
-    categoryDialog.selectedIds = [...categoryDialog.selectedIds, category.id]
+  try {
+    const sortOrder = Number(createCategoryDialog.sortOrder)
+    const category = await createCategory(name, Number.isFinite(sortOrder) ? sortOrder : categories.value.length)
+    if (!categories.value.some((item) => item.id === category.id)) categories.value.push(category)
+    categories.value = [...categories.value].sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder
+      return left.name.localeCompare(right.name)
+    })
+    const attachToCurrentComic = createCategoryDialog.attachToCurrentComic
+    closeCreateCategoryDialog()
+    if (attachToCurrentComic && categoryDialog.open && !categoryDialog.selectedIds.includes(category.id)) {
+      categoryDialog.selectedIds = [...categoryDialog.selectedIds, category.id]
+    }
+    notifySuccess('分类已创建')
+  } catch (e) {
+    notifyError(e.message || '分类创建失败')
   }
-  message.value = '分类已创建'
 }
 
 const renameCategory = async (category, name) => {
   const cleanName = String(name || '').trim()
   if (!cleanName) return
-  const updated = await updateCategory(category.id, { name: cleanName })
-  category.name = updated.name
+  try {
+    const updated = await updateCategory(category.id, { name: cleanName })
+    category.name = updated.name
+    notifySuccess('分类已重命名')
+  } catch (e) {
+    notifyError(e.message || '分类重命名失败')
+  }
 }
 
 const removeCategory = async (category) => {
   if (!confirm(`删除分类“${category.name}”？`)) return
-  await deleteCategory(category.id)
-  categories.value = categories.value.filter((item) => item.id !== category.id)
-  comics.value.forEach((comic) => {
-    comic.categories = (comic.categories || []).filter((item) => item.id !== category.id)
-  })
+  try {
+    await deleteCategory(category.id)
+    categories.value = categories.value.filter((item) => item.id !== category.id)
+    comics.value.forEach((comic) => {
+      comic.categories = (comic.categories || []).filter((item) => item.id !== category.id)
+    })
+    notifySuccess('分类已删除')
+  } catch (e) {
+    notifyError(e.message || '分类删除失败')
+  }
 }
 
 const handleGlobalKeydown = (event) => {
@@ -1023,6 +1103,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearDeleteConfirmTimer()
+  messages.value.forEach((item) => {
+    if (item.timerId) window.clearTimeout(item.timerId)
+  })
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', closeContextMenu)
   window.removeEventListener('scroll', closeContextMenu, true)

@@ -69,6 +69,67 @@ button {
   grid-template-columns: 320px 1fr;
 }
 
+.message-stack {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 90;
+  width: min(360px, calc(100vw - 36px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.message-toast {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(85, 214, 190, 0.34);
+  border-radius: 8px;
+  background: rgba(20, 27, 36, 0.96);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+  text-align: left;
+}
+
+.message-toast span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-toast-icon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #08231f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.message-toast.error {
+  border-color: rgba(255, 107, 134, 0.46);
+}
+
+.message-toast.error .message-toast-icon {
+  background: var(--danger);
+  color: #2a0710;
+}
+
 .sidebar {
   height: 100vh;
   overflow: hidden;
@@ -90,7 +151,6 @@ button {
 }
 
 .brand span,
-.message,
 .panel-title span,
 .comic-row span {
   color: var(--muted);
@@ -247,7 +307,7 @@ input {
   min-width: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   padding: 18px;
 }
 
@@ -306,15 +366,6 @@ input {
   font-size: 28px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-message {
-  margin: 0 0 12px;
-  padding: 9px 12px;
-  border: 1px solid rgba(85, 214, 190, 0.28);
-  border-radius: 6px;
-  background: rgba(85, 214, 190, 0.1);
-  color: var(--text);
 }
 
 .eyebrow {
