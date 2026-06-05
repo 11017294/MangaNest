@@ -1,37 +1,11 @@
 <template>
   <main class="admin-shell" @click="closeContextMenu">
-    <aside class="sidebar">
-      <div class="brand">
-        <strong>目录导航</strong>
-        <span>{{ currentPath || '漫画库根目录' }}</span>
-      </div>
-
-      <section class="panel">
-        <div class="panel-title">
-          <h2>目录</h2>
-          <button class="text-button" @click="openFolder('')">根目录</button>
-        </div>
-        <div class="breadcrumbs">
-          <button
-            v-for="crumb in breadcrumbs"
-            :key="crumb.path"
-            :class="{ active: crumb.path === currentPath }"
-            @click="openFolder(crumb.path)"
-          >
-            {{ crumb.name }}
-          </button>
-        </div>
-        <div class="folder-nav">
-          <button
-            v-for="dir in folder.folders"
-            :key="dir.path"
-            @click="openFolder(dir.path)"
-          >
-            {{ dir.name }}
-          </button>
-        </div>
-      </section>
-    </aside>
+    <AdminSidebar
+      :current-path="currentPath"
+      :folder="folder"
+      :breadcrumbs="breadcrumbs"
+      @open-folder="openFolder"
+    />
 
     <section class="workspace">
       <header class="workspace-header">
@@ -51,360 +25,120 @@
         <button :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">设置</button>
       </nav>
 
-      <section v-if="activeTab === 'files'" class="panel content-panel">
-        <div class="panel-title">
-          <h2>文件管理</h2>
-          <span>{{ folder.folders.length }} 个目录 · {{ folder.images.length }} 张图片</span>
-        </div>
+      <FileManagerPanel
+        v-if="activeTab === 'files'"
+        :folder="folder"
+        :folder-loading="folderLoading"
+        @context="openFileContextMenu"
+        @drag-start="startDragFolder"
+        @drop-folder="dropFolder"
+        @open-folder="openFolder"
+        @preview-image="openFolderImagePreview"
+        @rename="renamePath"
+      />
 
-        <div v-if="folderLoading" class="empty-state">加载目录...</div>
-        <div v-else class="file-grid">
-          <article
-            v-for="dir in folder.folders"
-            :key="dir.path"
-            class="folder-card"
-            draggable="true"
-            @contextmenu.prevent.stop="openFileContextMenu($event, dir, 'folder')"
-            @dragstart="startDragFolder(dir)"
-            @dragover.prevent
-            @drop.prevent="dropFolder(dir)"
-          >
-            <button class="thumb folder-thumb" @click="openFolder(dir.path)">
-              <img v-if="dir.coverImage" :src="imageUrl(dir.coverImage)" alt="" loading="lazy" />
-              <span v-else>无图片</span>
-              <small class="type-badge" aria-label="文件夹">DIR</small>
-            </button>
-            <input
-              :value="dir.name"
-              class="name-input"
-              @change="renamePath(dir.path, $event.target.value)"
-            />
-          </article>
+      <ComicManagerPanel
+        v-if="activeTab === 'comics'"
+        v-model:query="comicQuery"
+        :comics="filteredComics"
+        :selected-comic-ids="selectedComicIds"
+        :all-selected="allFilteredSelected"
+        @context="openComicContextMenu"
+        @open-category-dialog="openCategoryDialog"
+        @open-images="openComicImages"
+        @remove-index="removeComicIndex"
+        @remove-selected="removeSelectedComicIndexes"
+        @toggle-all="toggleAllFilteredComics"
+        @toggle-selection="toggleComicSelection"
+      />
 
-          <article
-            v-for="image in folder.images"
-            :key="image.path"
-            class="image-card"
-            @contextmenu.prevent.stop="openFileContextMenu($event, image, 'image')"
-          >
-            <button class="thumb" @click="openFolderImagePreview(image)">
-              <img :src="imageUrl(image.path)" :alt="image.name" loading="lazy" />
-            </button>
-            <input
-              :value="image.name"
-              class="name-input"
-              @change="renamePath(image.path, $event.target.value)"
-            />
-          </article>
-        </div>
-      </section>
+      <CategoryManagerPanel
+        v-if="activeTab === 'categories'"
+        :categories="categories"
+        @category-context="openCategoryContextMenu"
+        @create="openCreateCategoryDialog"
+        @list-context="openCategoryListContextMenu"
+        @move="moveCategory"
+        @remove="removeCategory"
+        @rename="renameCategory"
+      />
 
-      <section v-if="activeTab === 'comics'" class="panel content-panel">
-        <div class="panel-title">
-          <h2>漫画管理</h2>
-          <span>{{ filteredComics.length }} 本</span>
-        </div>
-        <input v-model="comicQuery" class="search-input" placeholder="搜索漫画标题" />
-        <div class="bulk-toolbar">
-          <label class="select-all-control">
-            <input type="checkbox" :checked="allFilteredSelected" @change="toggleAllFilteredComics($event.target.checked)" />
-            全选
-          </label>
-          <button class="danger-button" :disabled="!selectedComicIds.length" @click="removeSelectedComicIndexes">
-            批量删除索引
-          </button>
-          <span>{{ selectedComicIds.length }} 项已选</span>
-        </div>
-        <div class="comic-table">
-          <article
-            v-for="comic in filteredComics"
-            :key="comic.id"
-            class="comic-row"
-            @contextmenu.prevent.stop="openComicContextMenu($event, comic)"
-          >
-            <input
-              class="comic-select"
-              type="checkbox"
-              :checked="selectedComicIds.includes(comic.id)"
-              @change="toggleComicSelection(comic.id, $event.target.checked)"
-            />
-            <button class="comic-cover-button" @click="openComicImages(comic, 'view')">
-              <img v-if="comic.coverPath" :src="imageUrl(comic.coverPath)" alt="" loading="lazy" />
-              <span v-else>无封面</span>
-            </button>
-            <div class="comic-main">
-              <strong>{{ comic.title }}</strong>
-              <span>{{ comic.chapterCount }} 章</span>
-              <div class="comic-category-summary">
-                <span
-                  v-for="category in comic.categories || []"
-                  :key="category.id"
-                  class="comic-category-chip"
-                >
-                  {{ category.name }}
-                </span>
-                <span v-if="!comic.categories?.length" class="muted-chip">未分类</span>
-              </div>
-            </div>
-            <div class="comic-actions">
-              <button @click="openCategoryDialog(comic)">管理分类</button>
-              <button @click="openComicImages(comic, 'view')">显示图片</button>
-              <button @click="openComicImages(comic, 'cover')">设置封面</button>
-              <button class="danger-button" @click="removeComicIndex(comic)">删索引</button>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="activeTab === 'categories'" class="panel content-panel" @contextmenu.prevent="openCategoryListContextMenu($event)">
-        <div class="panel-title">
-          <h2>分类管理</h2>
-          <span>{{ categories.length }} 个</span>
-        </div>
-        <div class="category-toolbar">
-          <button class="primary-button" @click="openCreateCategoryDialog()">新增分类</button>
-        </div>
-        <div class="category-list">
-          <article
-            v-for="(category, index) in categories"
-            :key="category.id"
-            class="category-row"
-            @contextmenu.prevent.stop="openCategoryContextMenu($event, category, index)"
-          >
-            <div class="sort-actions">
-              <button :disabled="index === 0" @click="moveCategory(index, -1)">上移</button>
-              <button :disabled="index === categories.length - 1" @click="moveCategory(index, 1)">下移</button>
-            </div>
-            <input :value="category.name" @change="renameCategory(category, $event.target.value)" />
-            <button class="danger-text" @click="removeCategory(category)">删除</button>
-          </article>
-        </div>
-      </section>
-
-      <section v-if="activeTab === 'settings'" class="panel content-panel settings-panel">
-        <div class="panel-title">
-          <h2>系统设置</h2>
-          <span>漫画库根目录与索引</span>
-        </div>
-        <section class="library-console settings-console">
-          <div class="library-copy">
-            <span class="eyebrow">Library Root</span>
-            <h1>漫画库根目录</h1>
-            <p>{{ folder.libraryPath || libraryPathDraft || '还没有设置漫画库根目录' }}</p>
-          </div>
-          <div class="library-controls">
-            <label>
-              <span>本机绝对路径</span>
-              <input
-                v-model="libraryPathDraft"
-                placeholder="例如 D:\\MangaLibrary"
-                @keyup.enter="saveLibraryPath"
-              />
-            </label>
-            <div class="library-actions">
-              <button class="primary-button" @click="saveLibraryPath">保存根目录</button>
-              <button class="secondary-button" :disabled="scanning" @click="scan">
-                {{ scanning ? '扫描中' : '扫描并重建索引' }}
-              </button>
-            </div>
-          </div>
-        </section>
-      </section>
+      <SettingsPanel
+        v-if="activeTab === 'settings'"
+        v-model:library-path-draft="libraryPathDraft"
+        :library-path="folder.libraryPath"
+        :scanning="scanning"
+        @save="saveLibraryPath"
+        @scan="scan"
+      />
     </section>
 
-    <div v-if="previewImage" class="preview-overlay" @click.self="closePreview" @wheel.prevent="handlePreviewWheel">
-      <button class="preview-close" @click="closePreview">关闭</button>
-      <button
-        v-if="canPreviewPrevious"
-        class="preview-nav preview-prev"
-        aria-label="上一张"
-        @click.stop="shiftPreview(-1)"
-      >
-        ‹
-      </button>
-      <button
-        v-if="canPreviewNext"
-        class="preview-nav preview-next"
-        aria-label="下一张"
-        @click.stop="shiftPreview(1)"
-      >
-        ›
-      </button>
-      <div class="preview-click-zone preview-click-prev" @click.stop="shiftPreview(-1)"></div>
-      <div class="preview-click-zone preview-click-next" @click.stop="shiftPreview(1)"></div>
-      <img :src="imageUrl(previewImage.path)" :alt="previewImage.name" @click.stop />
-      <div class="preview-caption">
-        <strong>{{ previewImage.name }}</strong>
-        <span>{{ previewPositionLabel }}</span>
-      </div>
-    </div>
+    <ImagePreview
+      :image="previewImage"
+      :can-previous="canPreviewPrevious"
+      :can-next="canPreviewNext"
+      :position-label="previewPositionLabel"
+      @close="closePreview"
+      @shift="shiftPreview"
+      @wheel="handlePreviewWheel"
+    />
 
-    <div v-if="deleteConfirmDialog.open" class="delete-confirm-overlay" @click.self="closeDeleteConfirmDialog">
-      <section class="delete-confirm-dialog">
-        <header class="image-dialog-header">
-          <div>
-            <span class="eyebrow">Delete</span>
-            <h2>确认删除{{ deleteConfirmDialog.type === 'folder' ? '文件夹' : '文件' }}</h2>
-          </div>
-          <button class="secondary-button" :disabled="deleteConfirmDialog.submitting" @click="closeDeleteConfirmDialog">关闭</button>
-        </header>
-        <div class="delete-confirm-body">
-          <p class="delete-warning">这个操作会直接删除磁盘上的{{ deleteConfirmDialog.type === 'folder' ? '文件夹及其中所有内容' : '文件' }}，无法在应用内恢复。</p>
-          <strong>{{ deleteConfirmDialog.name }}</strong>
-          <small>{{ deleteConfirmDialog.path }}</small>
-          <div class="delete-confirm-actions">
-            <button class="secondary-button" :disabled="deleteConfirmDialog.submitting" @click="closeDeleteConfirmDialog">取消</button>
-            <button
-              class="danger-button"
-              :disabled="deleteConfirmDialog.secondsRemaining > 0 || deleteConfirmDialog.submitting"
-              @click="confirmDeletePath"
-            >
-              <span v-if="deleteConfirmDialog.submitting">删除中...</span>
-              <span v-else-if="deleteConfirmDialog.secondsRemaining > 0">确认删除 {{ deleteConfirmDialog.secondsRemaining }}s</span>
-              <span v-else>确认删除</span>
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
+    <DeleteConfirmDialog
+      :dialog="deleteConfirmDialog"
+      @close="closeDeleteConfirmDialog"
+      @confirm="confirmDeletePath"
+    />
 
-    <div v-if="comicImageDialog.open" class="image-dialog-overlay" @click.self="closeComicImageDialog">
-      <section class="image-dialog">
-        <header class="image-dialog-header">
-          <div>
-            <span class="eyebrow">{{ comicImageDialog.mode === 'cover' ? 'Choose Cover' : 'Images' }}</span>
-            <h2>{{ comicImageDialog.comic?.title }}</h2>
-          </div>
-          <button class="secondary-button" @click="closeComicImageDialog">关闭</button>
-        </header>
-        <div class="image-dialog-body">
-          <aside class="chapter-sidebar">
-            <button
-              v-for="chapter in comicImageDialog.chapters"
-              :key="chapter.id"
-              :class="{ active: comicImageDialog.activeChapterId === chapter.id }"
-              @click="selectDialogChapter(chapter)"
-            >
-              <strong>{{ chapter.title }}</strong>
-              <span>{{ chapter.pageCount || 0 }} 页</span>
-            </button>
-          </aside>
-          <section class="dialog-pages">
-            <div v-if="comicImageDialog.pageLoading" class="empty-state">加载图片...</div>
-            <div v-else-if="!comicImageDialog.pages.length" class="empty-state">这个章节没有图片</div>
-            <div v-else class="dialog-page-grid">
-              <button
-                v-for="page in comicImageDialog.pages"
-                :key="page.id"
-                class="dialog-page-tile"
-                :class="{ selected: isCurrentComicCover(page), 'cover-mode': comicImageDialog.mode === 'cover' }"
-                @click="comicImageDialog.mode === 'cover' ? chooseCoverPage(page) : previewPage(page)"
-                @contextmenu.prevent.stop="openDialogPageContextMenu($event, page)"
-              >
-                <img :src="imageUrl(page.filePath)" :alt="page.name" loading="lazy" />
-                <span>{{ page.name }}</span>
-                <small v-if="isCurrentComicCover(page)" class="cover-selected-label">当前封面</small>
-                <small v-else-if="comicImageDialog.mode === 'cover'" class="cover-set-label">点击设为封面</small>
-              </button>
-            </div>
-          </section>
-        </div>
-      </section>
-    </div>
+    <ComicImageDialog
+      :dialog="comicImageDialog"
+      :is-current-cover="isCurrentComicCover"
+      @choose-cover="chooseCoverPage"
+      @close="closeComicImageDialog"
+      @page-context="openDialogPageContextMenu"
+      @preview-page="previewPage"
+      @select-chapter="selectDialogChapter"
+    />
 
-    <div v-if="categoryDialog.open" class="category-dialog-overlay" @click.self="closeCategoryDialog">
-      <section class="category-dialog">
-        <header class="image-dialog-header">
-          <div>
-            <span class="eyebrow">Categories</span>
-            <h2>{{ categoryDialog.comic?.title }}</h2>
-          </div>
-          <button class="secondary-button" @click="closeCategoryDialog">关闭</button>
-        </header>
-        <div class="category-dialog-body">
-          <div v-if="!categories.length" class="empty-state compact">还没有分类，可以先新建一个。</div>
-          <div v-else class="category-dialog-list">
-            <label v-for="category in categories" :key="category.id" class="category-option">
-              <input
-                type="checkbox"
-                :checked="categoryDialog.selectedIds.includes(category.id)"
-                @change="toggleCategoryDialogSelection(category.id, $event.target.checked)"
-              />
-              <span>{{ category.name }}</span>
-            </label>
-          </div>
-          <div class="category-dialog-footer">
-            <button class="secondary-button" @click="openCreateCategoryDialog({ attachToCurrentComic: true })">新建分类</button>
-            <button class="primary-button" @click="saveAndCloseCategoryDialog">保存分类</button>
-          </div>
-        </div>
-      </section>
-    </div>
+    <CategoryDialog
+      :dialog="categoryDialog"
+      :categories="categories"
+      @close="closeCategoryDialog"
+      @create="openCreateCategoryDialog({ attachToCurrentComic: true })"
+      @save="saveAndCloseCategoryDialog"
+      @toggle="toggleCategoryDialogSelection"
+    />
 
-    <div v-if="createCategoryDialog.open" class="category-dialog-overlay" @click.self="closeCreateCategoryDialog">
-      <section class="category-dialog create-category-dialog">
-        <header class="image-dialog-header">
-          <div>
-            <span class="eyebrow">New Category</span>
-            <h2>新增分类</h2>
-          </div>
-          <button class="secondary-button" @click="closeCreateCategoryDialog">关闭</button>
-        </header>
-        <form class="create-category-form" @submit.prevent="saveCreateCategoryDialog">
-          <label>
-            <span>分类名</span>
-            <input v-model="createCategoryDialog.name" placeholder="分类名" />
-          </label>
-          <label>
-            <span>排序号</span>
-            <input v-model.number="createCategoryDialog.sortOrder" type="number" min="0" step="1" placeholder="排序号" />
-          </label>
-          <p v-if="createCategoryDialog.error" class="form-error">{{ createCategoryDialog.error }}</p>
-          <div class="category-dialog-footer">
-            <button class="secondary-button" type="button" @click="closeCreateCategoryDialog">取消</button>
-            <button class="primary-button" type="submit">创建分类</button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <CreateCategoryDialog
+      :dialog="createCategoryDialog"
+      @close="closeCreateCategoryDialog"
+      @save="saveCreateCategoryDialog"
+      @update:name="createCategoryDialog.name = $event"
+      @update:sort-order="createCategoryDialog.sortOrder = $event"
+    />
 
-    <div
-      v-if="contextMenu.open"
-      class="context-menu"
-      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-      @click.stop
-      @contextmenu.prevent
-    >
-      <div class="context-menu-title">{{ contextMenu.title }}</div>
-      <button
-        v-for="item in contextMenu.items"
-        :key="item.label"
-        :class="{ danger: item.danger }"
-        :disabled="item.disabled"
-        @click="runContextAction(item)"
-      >
-        {{ item.label }}
-      </button>
-    </div>
-
-    <div v-if="messages.length" class="message-stack" aria-live="polite" aria-atomic="false">
-      <button
-        v-for="item in messages"
-        :key="item.id"
-        class="message-toast"
-        :class="item.type"
-        type="button"
-        @click="removeMessage(item.id)"
-      >
-        <span class="message-toast-icon">{{ item.type === 'error' ? '!' : '✓' }}</span>
-        <span>{{ item.text }}</span>
-      </button>
-    </div>
+    <ContextMenu :menu="contextMenu" @run="runContextAction" />
+    <AdminMessage :messages="messages" @close="removeMessage" />
   </main>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AdminMessage from './components/AdminMessage.vue'
+import AdminSidebar from './components/AdminSidebar.vue'
+import CategoryDialog from './components/CategoryDialog.vue'
+import CategoryManagerPanel from './components/CategoryManagerPanel.vue'
+import ComicImageDialog from './components/ComicImageDialog.vue'
+import ComicManagerPanel from './components/ComicManagerPanel.vue'
+import ContextMenu from './components/ContextMenu.vue'
+import CreateCategoryDialog from './components/CreateCategoryDialog.vue'
+import DeleteConfirmDialog from './components/DeleteConfirmDialog.vue'
+import FileManagerPanel from './components/FileManagerPanel.vue'
+import ImagePreview from './components/ImagePreview.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import { useContextMenu } from './composables/useContextMenu'
+import { useDeleteConfirm } from './composables/useDeleteConfirm'
+import { useImagePreview } from './composables/useImagePreview'
+import { useMessages } from './composables/useMessages'
 import {
   createCategory,
   deleteCategory,
@@ -416,7 +150,6 @@ import {
   fetchComics,
   fetchFolder,
   fetchSettings,
-  imageUrl,
   moveFolder,
   renameFile,
   revealFile,
@@ -431,14 +164,9 @@ import {
 const activeTab = ref('files')
 const currentPath = ref('')
 const libraryPathDraft = ref('')
-const messages = ref([])
 const scanning = ref(false)
 const folderLoading = ref(false)
 const draggedFolder = ref(null)
-const previewImage = ref(null)
-const previewList = ref([])
-const previewIndex = ref(-1)
-const lastPreviewWheelAt = ref(0)
 const comicQuery = ref('')
 const comics = ref([])
 const categories = ref([])
@@ -464,28 +192,24 @@ const createCategoryDialog = reactive({
   error: '',
   attachToCurrentComic: false
 })
-const deleteConfirmDialog = reactive({
-  open: false,
-  path: '',
-  name: '',
-  type: 'file',
-  secondsRemaining: 0,
-  submitting: false,
-  timerId: null
-})
-const contextMenu = reactive({
-  open: false,
-  x: 0,
-  y: 0,
-  title: '',
-  items: []
-})
 const folder = reactive({
   libraryPath: '',
   folders: [],
   images: []
 })
-let nextMessageId = 0
+const { messages, notifyError, notifySuccess, removeMessage } = useMessages()
+const { closeContextMenu, contextMenu, runContextAction, showContextMenu } = useContextMenu({ onError: notifyError })
+const { closeDeleteConfirmDialog, deleteConfirmDialog, openDeleteConfirmDialog } = useDeleteConfirm()
+const {
+  canPreviewNext,
+  canPreviewPrevious,
+  closePreview,
+  handlePreviewWheel,
+  openPreview,
+  previewImage,
+  previewPositionLabel,
+  shiftPreview
+} = useImagePreview()
 
 const breadcrumbs = computed(() => {
   const crumbs = [{ name: '根目录', path: '' }]
@@ -512,30 +236,6 @@ const allFilteredSelected = computed(() => {
   return filteredComics.value.length > 0
     && filteredComics.value.every((comic) => selectedComicIds.value.includes(comic.id))
 })
-
-const canPreviewPrevious = computed(() => previewIndex.value > 0)
-const canPreviewNext = computed(() => previewIndex.value >= 0 && previewIndex.value < previewList.value.length - 1)
-const previewPositionLabel = computed(() => {
-  if (!previewImage.value || !previewList.value.length || previewIndex.value < 0) return ''
-  return `${previewIndex.value + 1} / ${previewList.value.length}`
-})
-
-const removeMessage = (id) => {
-  const target = messages.value.find((item) => item.id === id)
-  if (target?.timerId) window.clearTimeout(target.timerId)
-  messages.value = messages.value.filter((item) => item.id !== id)
-}
-
-const notify = (text, type = 'success') => {
-  const cleanText = String(text || '').trim()
-  if (!cleanText) return
-  const id = nextMessageId++
-  const timerId = window.setTimeout(() => removeMessage(id), 3200)
-  messages.value = [...messages.value.slice(-3), { id, type, text: cleanText, timerId }]
-}
-
-const notifySuccess = (text) => notify(text, 'success')
-const notifyError = (text) => notify(text, 'error')
 
 const loadSettings = async () => {
   const settings = await fetchSettings().catch(() => ({}))
@@ -625,34 +325,8 @@ const dropFolder = async (targetDir) => {
   }
 }
 
-const clearDeleteConfirmTimer = () => {
-  if (!deleteConfirmDialog.timerId) return
-  window.clearInterval(deleteConfirmDialog.timerId)
-  deleteConfirmDialog.timerId = null
-}
-
-const closeDeleteConfirmDialog = () => {
-  if (deleteConfirmDialog.submitting) return
-  clearDeleteConfirmTimer()
-  deleteConfirmDialog.open = false
-  deleteConfirmDialog.path = ''
-  deleteConfirmDialog.name = ''
-  deleteConfirmDialog.type = 'file'
-  deleteConfirmDialog.secondsRemaining = 0
-}
-
 const removePath = (path, name, type = 'file') => {
-  clearDeleteConfirmTimer()
-  deleteConfirmDialog.open = true
-  deleteConfirmDialog.path = path
-  deleteConfirmDialog.name = name
-  deleteConfirmDialog.type = type
-  deleteConfirmDialog.secondsRemaining = 3
-  deleteConfirmDialog.submitting = false
-  deleteConfirmDialog.timerId = window.setInterval(() => {
-    deleteConfirmDialog.secondsRemaining = Math.max(0, deleteConfirmDialog.secondsRemaining - 1)
-    if (deleteConfirmDialog.secondsRemaining === 0) clearDeleteConfirmTimer()
-  }, 1000)
+  openDeleteConfirmDialog(path, name, type)
 }
 
 const confirmDeletePath = async () => {
@@ -706,66 +380,8 @@ const setParentFolderCover = async (folderItem) => {
   }
 }
 
-const openPreview = (image, list = []) => {
-  const normalizedImagePath = normalizedPath(image?.path)
-  const normalizedList = list.map((item) => ({
-    path: item.path || item.filePath,
-    name: item.name
-  })).filter((item) => item.path)
-  const foundIndex = normalizedList.findIndex((item) => normalizedPath(item.path) === normalizedImagePath)
-  previewList.value = normalizedList.length ? normalizedList : [image]
-  previewIndex.value = foundIndex >= 0 ? foundIndex : 0
-  previewImage.value = previewList.value[previewIndex.value] || image
-}
-
-const closePreview = () => {
-  previewImage.value = null
-  previewList.value = []
-  previewIndex.value = -1
-}
-
-const shiftPreview = (direction) => {
-  if (!previewImage.value || !previewList.value.length) return
-  const nextIndex = previewIndex.value + direction
-  if (nextIndex < 0 || nextIndex >= previewList.value.length) return
-  previewIndex.value = nextIndex
-  previewImage.value = previewList.value[nextIndex]
-}
-
-const handlePreviewWheel = (event) => {
-  if (!previewImage.value || Math.abs(event.deltaY) < 8) return
-  const now = Date.now()
-  if (now - lastPreviewWheelAt.value < 260) return
-  lastPreviewWheelAt.value = now
-  shiftPreview(event.deltaY > 0 ? 1 : -1)
-}
-
 const openFolderImagePreview = (image) => {
   openPreview(image, folder.images)
-}
-
-const closeContextMenu = () => {
-  contextMenu.open = false
-}
-
-const showContextMenu = (event, title, items) => {
-  const visibleItems = items.filter(Boolean)
-  const estimatedHeight = 42 + visibleItems.length * 38
-  contextMenu.title = title
-  contextMenu.items = visibleItems
-  contextMenu.x = Math.min(event.clientX, Math.max(12, window.innerWidth - 230))
-  contextMenu.y = Math.min(event.clientY, Math.max(12, window.innerHeight - estimatedHeight - 12))
-  contextMenu.open = true
-}
-
-const runContextAction = async (item) => {
-  if (!item || item.disabled) return
-  closeContextMenu()
-  try {
-    await item.action?.()
-  } catch (e) {
-    notifyError(e.message || '操作失败')
-  }
 }
 
 const openFileContextMenu = (event, item, type) => {
@@ -1102,10 +718,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  clearDeleteConfirmTimer()
-  messages.value.forEach((item) => {
-    if (item.timerId) window.clearTimeout(item.timerId)
-  })
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', closeContextMenu)
   window.removeEventListener('scroll', closeContextMenu, true)
