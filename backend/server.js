@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import {
     sequelize,
@@ -73,6 +74,67 @@ const isInsideBase = (targetPath, basePath) => {
 
 const normalizeRelativePath = (value = '') => {
     return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+};
+
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']);
+
+const compareByName = (left, right) => {
+    return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' });
+};
+
+const isImageFileName = (fileName) => {
+    return IMAGE_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+};
+
+const resolveManualCoverImage = (coverImage, libraryPath) => {
+    if (!coverImage) return null;
+    if (coverImage.includes('#')) return coverImage;
+
+    const normalizedCover = normalizeRelativePath(coverImage);
+    const fullCoverPath = path.resolve(libraryPath, normalizedCover);
+    if (!isInsideBase(fullCoverPath, libraryPath)) return null;
+    if (!fs.existsSync(fullCoverPath)) return null;
+
+    const stat = fs.statSync(fullCoverPath);
+    return stat.isFile() && isImageFileName(fullCoverPath) ? normalizedCover : null;
+};
+
+const findFirstImageInFolder = (folderPath, libraryPath, cache = new Map()) => {
+    const cacheKey = path.resolve(folderPath);
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+    let items = [];
+    try {
+        items = fs.readdirSync(folderPath, { withFileTypes: true }).sort(compareByName);
+    } catch {
+        cache.set(cacheKey, null);
+        return null;
+    }
+
+    const directImage = items.find((item) => item.isFile() && isImageFileName(item.name));
+    if (directImage) {
+        const imagePath = path.join(folderPath, directImage.name);
+        const relativeImagePath = path.relative(libraryPath, imagePath).replace(/\\/g, '/');
+        cache.set(cacheKey, relativeImagePath);
+        return relativeImagePath;
+    }
+
+    for (const item of items) {
+        if (!item.isDirectory()) continue;
+        const nestedImage = findFirstImageInFolder(path.join(folderPath, item.name), libraryPath, cache);
+        if (nestedImage) {
+            cache.set(cacheKey, nestedImage);
+            return nestedImage;
+        }
+    }
+
+    cache.set(cacheKey, null);
+    return null;
+};
+
+const resolveFolderCoverImage = (relativePath, fullPath, libraryPath, metadataMap = {}, cache = new Map()) => {
+    return resolveManualCoverImage(metadataMap[relativePath], libraryPath)
+        || findFirstImageInFolder(fullPath, libraryPath, cache);
 };
 
 const resolveLibraryRelativePath = async (relativePath = '') => {
@@ -438,6 +500,7 @@ app.get('/api/admin/folders', async (req, res) => {
             ? await FolderMetadata.findAll({ where: { path: folderPaths } })
             : [];
         const metadataMap = Object.fromEntries(metadataList.map((item) => [item.path, item.coverImage]));
+        const coverCache = new Map();
 
         for (const item of items) {
             const itemPath = path.join(fullPath, item.name);
@@ -446,11 +509,10 @@ app.get('/api/admin/folders', async (req, res) => {
                 folders.push({
                     name: item.name,
                     path: itemRelativePath,
-                    coverImage: metadataMap[itemRelativePath] || null
+                    coverImage: resolveFolderCoverImage(itemRelativePath, itemPath, libraryPath, metadataMap, coverCache)
                 });
             } else if (item.isFile()) {
-                const ext = path.extname(item.name).toLowerCase();
-                if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
+                if (isImageFileName(item.name)) {
                     images.push({
                         name: item.name,
                         path: itemRelativePath,
@@ -461,8 +523,8 @@ app.get('/api/admin/folders', async (req, res) => {
             }
         }
 
-        folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-        images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        folders.sort(compareByName);
+        images.sort(compareByName);
 
         res.json({ libraryPath, currentPath: relativePath, folders, images });
     } catch (error) {
@@ -533,6 +595,36 @@ app.delete('/api/admin/files', async (req, res) => {
         res.json({ success: true, requiresScan: true });
     } catch (error) {
         sendAdminError(res, error, 'Failed to delete admin file');
+    }
+});
+
+app.post('/api/admin/files/reveal', async (req, res) => {
+    try {
+        const target = await resolveLibraryRelativePath(req.body?.path || '');
+        if (!fs.existsSync(target.fullPath)) return res.status(404).json({ error: 'Path not found' });
+
+        const stat = fs.statSync(target.fullPath);
+        if (process.platform === 'win32') {
+            const args = stat.isDirectory()
+                ? [target.fullPath]
+                : [`/select,${target.fullPath}`];
+            const child = spawn('explorer.exe', args, { detached: true, stdio: 'ignore' });
+            child.unref();
+        } else if (process.platform === 'darwin') {
+            const args = stat.isDirectory()
+                ? [target.fullPath]
+                : ['-R', target.fullPath];
+            const child = spawn('open', args, { detached: true, stdio: 'ignore' });
+            child.unref();
+        } else {
+            const directoryPath = stat.isDirectory() ? target.fullPath : path.dirname(target.fullPath);
+            const child = spawn('xdg-open', [directoryPath], { detached: true, stdio: 'ignore' });
+            child.unref();
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to reveal admin file');
     }
 });
 
@@ -904,18 +996,19 @@ app.get('/api/folder-content', async (req, res) => {
         }
         const metadataMap = {};
         allMetadata.forEach(m => metadataMap[m.path] = m.coverImage);
+        const coverCache = new Map();
 
         for (const item of items) {
             if (item.isDirectory()) {
                 const relPath = path.relative(IMAGE_DIR, path.join(targetDir, item.name)).replace(/\\/g, '/');
+                const itemFullPath = path.join(targetDir, item.name);
                 folders.push({
                     name: item.name,
                     path: relPath,
-                    coverImage: metadataMap[relPath] || null
+                    coverImage: resolveFolderCoverImage(relPath, itemFullPath, IMAGE_DIR, metadataMap, coverCache)
                 });
             } else if (item.isFile()) {
-                const ext = path.extname(item.name).toLowerCase();
-                if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) {
+                if (isImageFileName(item.name)) {
                     images.push({
                         name: item.name,
                         relativePath: path.relative(IMAGE_DIR, path.join(targetDir, item.name)).replace(/\\/g, '/')
@@ -924,8 +1017,8 @@ app.get('/api/folder-content', async (req, res) => {
             }
         }
 
-        folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-        images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        folders.sort(compareByName);
+        images.sort(compareByName);
 
         const totalImages = images.length;
         let paginatedImages = images;

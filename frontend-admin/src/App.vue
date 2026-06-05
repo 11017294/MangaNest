@@ -1,5 +1,5 @@
 <template>
-  <main class="admin-shell">
+  <main class="admin-shell" @click="closeContextMenu">
     <aside class="sidebar">
       <div class="brand">
         <strong>目录导航</strong>
@@ -65,27 +65,29 @@
             :key="dir.path"
             class="folder-card"
             draggable="true"
+            @contextmenu.prevent.stop="openFileContextMenu($event, dir, 'folder')"
             @dragstart="startDragFolder(dir)"
             @dragover.prevent
             @drop.prevent="dropFolder(dir)"
           >
             <button class="thumb folder-thumb" @click="openFolder(dir.path)">
               <img v-if="dir.coverImage" :src="imageUrl(dir.coverImage)" alt="" loading="lazy" />
-              <span v-else>DIR</span>
+              <span v-else>无图片</span>
             </button>
             <input
               :value="dir.name"
               class="name-input"
               @change="renamePath(dir.path, $event.target.value)"
             />
-            <div class="row-actions">
-              <button @click="openFolder(dir.path)">打开</button>
-              <button class="danger-text" @click="removePath(dir.path, dir.name)">删除</button>
-            </div>
           </article>
 
-          <article v-for="image in folder.images" :key="image.path" class="image-card">
-            <button class="thumb" @click="previewImage = image">
+          <article
+            v-for="image in folder.images"
+            :key="image.path"
+            class="image-card"
+            @contextmenu.prevent.stop="openFileContextMenu($event, image, 'image')"
+          >
+            <button class="thumb" @click="openFolderImagePreview(image)">
               <img :src="imageUrl(image.path)" :alt="image.name" loading="lazy" />
             </button>
             <input
@@ -93,10 +95,6 @@
               class="name-input"
               @change="renamePath(image.path, $event.target.value)"
             />
-            <div class="row-actions">
-              <button @click="setCover(image)">设封面</button>
-              <button class="danger-text" @click="removePath(image.path, image.name)">删除</button>
-            </div>
           </article>
         </div>
       </section>
@@ -118,7 +116,12 @@
           <span>{{ selectedComicIds.length }} 项已选</span>
         </div>
         <div class="comic-table">
-          <article v-for="comic in filteredComics" :key="comic.id" class="comic-row">
+          <article
+            v-for="comic in filteredComics"
+            :key="comic.id"
+            class="comic-row"
+            @contextmenu.prevent.stop="openComicContextMenu($event, comic)"
+          >
             <input
               class="comic-select"
               type="checkbox"
@@ -153,7 +156,7 @@
         </div>
       </section>
 
-      <section v-if="activeTab === 'categories'" class="panel content-panel">
+      <section v-if="activeTab === 'categories'" class="panel content-panel" @contextmenu.prevent="openCategoryListContextMenu($event)">
         <div class="panel-title">
           <h2>分类管理</h2>
           <span>{{ categories.length }} 个</span>
@@ -162,7 +165,12 @@
           <button class="primary-button" @click="openCreateCategoryDialog()">新增分类</button>
         </div>
         <div class="category-list">
-          <article v-for="(category, index) in categories" :key="category.id" class="category-row">
+          <article
+            v-for="(category, index) in categories"
+            :key="category.id"
+            class="category-row"
+            @contextmenu.prevent.stop="openCategoryContextMenu($event, category, index)"
+          >
             <div class="sort-actions">
               <button :disabled="index === 0" @click="moveCategory(index, -1)">上移</button>
               <button :disabled="index === categories.length - 1" @click="moveCategory(index, 1)">下移</button>
@@ -204,9 +212,60 @@
       </section>
     </section>
 
-    <div v-if="previewImage" class="preview-overlay" @click.self="previewImage = null">
-      <button class="preview-close" @click="previewImage = null">关闭</button>
-      <img :src="imageUrl(previewImage.path)" :alt="previewImage.name" />
+    <div v-if="previewImage" class="preview-overlay" @click.self="closePreview" @wheel.prevent="handlePreviewWheel">
+      <button class="preview-close" @click="closePreview">关闭</button>
+      <button
+        v-if="canPreviewPrevious"
+        class="preview-nav preview-prev"
+        aria-label="上一张"
+        @click.stop="shiftPreview(-1)"
+      >
+        ‹
+      </button>
+      <button
+        v-if="canPreviewNext"
+        class="preview-nav preview-next"
+        aria-label="下一张"
+        @click.stop="shiftPreview(1)"
+      >
+        ›
+      </button>
+      <div class="preview-click-zone preview-click-prev" @click.stop="shiftPreview(-1)"></div>
+      <div class="preview-click-zone preview-click-next" @click.stop="shiftPreview(1)"></div>
+      <img :src="imageUrl(previewImage.path)" :alt="previewImage.name" @click.stop />
+      <div class="preview-caption">
+        <strong>{{ previewImage.name }}</strong>
+        <span>{{ previewPositionLabel }}</span>
+      </div>
+    </div>
+
+    <div v-if="deleteConfirmDialog.open" class="delete-confirm-overlay" @click.self="closeDeleteConfirmDialog">
+      <section class="delete-confirm-dialog">
+        <header class="image-dialog-header">
+          <div>
+            <span class="eyebrow">Delete</span>
+            <h2>确认删除{{ deleteConfirmDialog.type === 'folder' ? '文件夹' : '文件' }}</h2>
+          </div>
+          <button class="secondary-button" :disabled="deleteConfirmDialog.submitting" @click="closeDeleteConfirmDialog">关闭</button>
+        </header>
+        <div class="delete-confirm-body">
+          <p class="delete-warning">这个操作会直接删除磁盘上的{{ deleteConfirmDialog.type === 'folder' ? '文件夹及其中所有内容' : '文件' }}，无法在应用内恢复。</p>
+          <strong>{{ deleteConfirmDialog.name }}</strong>
+          <small>{{ deleteConfirmDialog.path }}</small>
+          <div class="delete-confirm-actions">
+            <button class="secondary-button" :disabled="deleteConfirmDialog.submitting" @click="closeDeleteConfirmDialog">取消</button>
+            <button
+              class="danger-button"
+              :disabled="deleteConfirmDialog.secondsRemaining > 0 || deleteConfirmDialog.submitting"
+              @click="confirmDeletePath"
+            >
+              <span v-if="deleteConfirmDialog.submitting">删除中...</span>
+              <span v-else-if="deleteConfirmDialog.secondsRemaining > 0">确认删除 {{ deleteConfirmDialog.secondsRemaining }}s</span>
+              <span v-else>确认删除</span>
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div v-if="comicImageDialog.open" class="image-dialog-overlay" @click.self="closeComicImageDialog">
@@ -238,10 +297,14 @@
                 v-for="page in comicImageDialog.pages"
                 :key="page.id"
                 class="dialog-page-tile"
+                :class="{ selected: isCurrentComicCover(page), 'cover-mode': comicImageDialog.mode === 'cover' }"
                 @click="comicImageDialog.mode === 'cover' ? chooseCoverPage(page) : previewPage(page)"
+                @contextmenu.prevent.stop="openDialogPageContextMenu($event, page)"
               >
                 <img :src="imageUrl(page.filePath)" :alt="page.name" loading="lazy" />
                 <span>{{ page.name }}</span>
+                <small v-if="isCurrentComicCover(page)" class="cover-selected-label">当前封面</small>
+                <small v-else-if="comicImageDialog.mode === 'cover'" class="cover-set-label">点击设为封面</small>
               </button>
             </div>
           </section>
@@ -304,11 +367,30 @@
         </form>
       </section>
     </div>
+
+    <div
+      v-if="contextMenu.open"
+      class="context-menu"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @click.stop
+      @contextmenu.prevent
+    >
+      <div class="context-menu-title">{{ contextMenu.title }}</div>
+      <button
+        v-for="item in contextMenu.items"
+        :key="item.label"
+        :class="{ danger: item.danger }"
+        :disabled="item.disabled"
+        @click="runContextAction(item)"
+      >
+        {{ item.label }}
+      </button>
+    </div>
   </main>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   createCategory,
   deleteCategory,
@@ -323,6 +405,7 @@ import {
   imageUrl,
   moveFolder,
   renameFile,
+  revealFile,
   scanLibrary,
   setComicCategories,
   setComicCover,
@@ -339,6 +422,9 @@ const scanning = ref(false)
 const folderLoading = ref(false)
 const draggedFolder = ref(null)
 const previewImage = ref(null)
+const previewList = ref([])
+const previewIndex = ref(-1)
+const lastPreviewWheelAt = ref(0)
 const comicQuery = ref('')
 const comics = ref([])
 const categories = ref([])
@@ -363,6 +449,22 @@ const createCategoryDialog = reactive({
   sortOrder: 0,
   error: '',
   attachToCurrentComic: false
+})
+const deleteConfirmDialog = reactive({
+  open: false,
+  path: '',
+  name: '',
+  type: 'file',
+  secondsRemaining: 0,
+  submitting: false,
+  timerId: null
+})
+const contextMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  title: '',
+  items: []
 })
 const folder = reactive({
   libraryPath: '',
@@ -394,6 +496,13 @@ const filteredComics = computed(() => {
 const allFilteredSelected = computed(() => {
   return filteredComics.value.length > 0
     && filteredComics.value.every((comic) => selectedComicIds.value.includes(comic.id))
+})
+
+const canPreviewPrevious = computed(() => previewIndex.value > 0)
+const canPreviewNext = computed(() => previewIndex.value >= 0 && previewIndex.value < previewList.value.length - 1)
+const previewPositionLabel = computed(() => {
+  if (!previewImage.value || !previewList.value.length || previewIndex.value < 0) return ''
+  return `${previewIndex.value + 1} / ${previewList.value.length}`
 })
 
 const loadSettings = async () => {
@@ -475,17 +584,141 @@ const dropFolder = async (targetDir) => {
   }
 }
 
-const removePath = async (path, name) => {
-  if (!confirm(`确定删除“${name}”？这个操作会删除磁盘文件。`)) return
-  await deleteFile(path)
-  message.value = '已删除，建议重新扫描索引'
-  await openFolder(currentPath.value)
+const clearDeleteConfirmTimer = () => {
+  if (!deleteConfirmDialog.timerId) return
+  window.clearInterval(deleteConfirmDialog.timerId)
+  deleteConfirmDialog.timerId = null
+}
+
+const closeDeleteConfirmDialog = () => {
+  if (deleteConfirmDialog.submitting) return
+  clearDeleteConfirmTimer()
+  deleteConfirmDialog.open = false
+  deleteConfirmDialog.path = ''
+  deleteConfirmDialog.name = ''
+  deleteConfirmDialog.type = 'file'
+  deleteConfirmDialog.secondsRemaining = 0
+}
+
+const removePath = (path, name, type = 'file') => {
+  clearDeleteConfirmTimer()
+  deleteConfirmDialog.open = true
+  deleteConfirmDialog.path = path
+  deleteConfirmDialog.name = name
+  deleteConfirmDialog.type = type
+  deleteConfirmDialog.secondsRemaining = 3
+  deleteConfirmDialog.submitting = false
+  deleteConfirmDialog.timerId = window.setInterval(() => {
+    deleteConfirmDialog.secondsRemaining = Math.max(0, deleteConfirmDialog.secondsRemaining - 1)
+    if (deleteConfirmDialog.secondsRemaining === 0) clearDeleteConfirmTimer()
+  }, 1000)
+}
+
+const confirmDeletePath = async () => {
+  if (!deleteConfirmDialog.open || deleteConfirmDialog.secondsRemaining > 0 || deleteConfirmDialog.submitting) return
+  deleteConfirmDialog.submitting = true
+  const deletedType = deleteConfirmDialog.type
+  const deletedName = deleteConfirmDialog.name
+  const deletedPath = deleteConfirmDialog.path
+  try {
+    await deleteFile(deletedPath)
+    message.value = `已删除${deletedType === 'folder' ? '文件夹' : '文件'}“${deletedName}”，建议重新扫描索引`
+    deleteConfirmDialog.submitting = false
+    closeDeleteConfirmDialog()
+    if (normalizedPath(previewImage.value?.path) === normalizedPath(deletedPath)) closePreview()
+    await openFolder(currentPath.value)
+  } catch (e) {
+    deleteConfirmDialog.submitting = false
+    message.value = e.message || '删除失败'
+  }
 }
 
 const setCover = async (image) => {
   await setFolderCover(currentPath.value, image.path)
   message.value = '当前目录封面已设置'
   await openFolder(currentPath.value)
+}
+
+const normalizedPath = (value) => String(value || '').replace(/\\/g, '/')
+
+const openPreview = (image, list = []) => {
+  const normalizedImagePath = normalizedPath(image?.path)
+  const normalizedList = list.map((item) => ({
+    path: item.path || item.filePath,
+    name: item.name
+  })).filter((item) => item.path)
+  const foundIndex = normalizedList.findIndex((item) => normalizedPath(item.path) === normalizedImagePath)
+  previewList.value = normalizedList.length ? normalizedList : [image]
+  previewIndex.value = foundIndex >= 0 ? foundIndex : 0
+  previewImage.value = previewList.value[previewIndex.value] || image
+}
+
+const closePreview = () => {
+  previewImage.value = null
+  previewList.value = []
+  previewIndex.value = -1
+}
+
+const shiftPreview = (direction) => {
+  if (!previewImage.value || !previewList.value.length) return
+  const nextIndex = previewIndex.value + direction
+  if (nextIndex < 0 || nextIndex >= previewList.value.length) return
+  previewIndex.value = nextIndex
+  previewImage.value = previewList.value[nextIndex]
+}
+
+const handlePreviewWheel = (event) => {
+  if (!previewImage.value || Math.abs(event.deltaY) < 8) return
+  const now = Date.now()
+  if (now - lastPreviewWheelAt.value < 260) return
+  lastPreviewWheelAt.value = now
+  shiftPreview(event.deltaY > 0 ? 1 : -1)
+}
+
+const openFolderImagePreview = (image) => {
+  openPreview(image, folder.images)
+}
+
+const closeContextMenu = () => {
+  contextMenu.open = false
+}
+
+const showContextMenu = (event, title, items) => {
+  const visibleItems = items.filter(Boolean)
+  const estimatedHeight = 42 + visibleItems.length * 38
+  contextMenu.title = title
+  contextMenu.items = visibleItems
+  contextMenu.x = Math.min(event.clientX, Math.max(12, window.innerWidth - 230))
+  contextMenu.y = Math.min(event.clientY, Math.max(12, window.innerHeight - estimatedHeight - 12))
+  contextMenu.open = true
+}
+
+const runContextAction = async (item) => {
+  if (!item || item.disabled) return
+  closeContextMenu()
+  try {
+    await item.action?.()
+  } catch (e) {
+    message.value = e.message || '操作失败'
+  }
+}
+
+const openFileContextMenu = (event, item, type) => {
+  const isFolder = type === 'folder'
+  showContextMenu(event, item.name, [
+    isFolder
+      ? { label: '打开目录', action: () => openFolder(item.path) }
+      : { label: '预览图片', action: () => openFolderImagePreview(item) },
+    {
+      label: '在资源管理器中显示',
+      action: async () => {
+        await revealFile(item.path)
+        message.value = '已在资源管理器中显示'
+      }
+    },
+    !isFolder && { label: '设为当前目录封面', action: () => setCover(item) },
+    { label: isFolder ? '删除目录' : '删除图片', danger: true, action: () => removePath(item.path, item.name, isFolder ? 'folder' : 'file') }
+  ])
 }
 
 const comicCategoryIds = (comic) => (comic.categories || []).map((category) => category.id)
@@ -531,6 +764,15 @@ const removeComicIndex = async (comic) => {
   message.value = '索引已删除'
 }
 
+const openComicContextMenu = (event, comic) => {
+  showContextMenu(event, comic.title, [
+    { label: '添加分类', action: () => openCategoryDialog(comic) },
+    { label: '显示图片', action: () => openComicImages(comic, 'view') },
+    { label: '设置封面', action: () => openComicImages(comic, 'cover') },
+    { label: '删除索引', danger: true, action: () => removeComicIndex(comic) }
+  ])
+}
+
 const toggleComicSelection = (comicId, checked) => {
   if (checked) {
     if (!selectedComicIds.value.includes(comicId)) selectedComicIds.value.push(comicId)
@@ -558,6 +800,15 @@ const removeSelectedComicIndexes = async () => {
   message.value = `已删除 ${ids.length} 个索引`
 }
 
+const chapterContainsPath = (chapter, filePath) => {
+  const coverPath = normalizedPath(filePath)
+  const chapterPath = normalizedPath(chapter?.path)
+  if (!coverPath || !chapterPath) return false
+  return coverPath === chapterPath
+    || coverPath.startsWith(`${chapterPath}/`)
+    || coverPath.startsWith(`${chapterPath}#`)
+}
+
 const openComicImages = async (comic, mode = 'view') => {
   comicImageDialog.open = true
   comicImageDialog.mode = mode
@@ -569,8 +820,11 @@ const openComicImages = async (comic, mode = 'view') => {
   try {
     const detail = await fetchComic(comic.id)
     comicImageDialog.chapters = detail.chapters || []
-    const firstChapter = comicImageDialog.chapters[0]
-    if (firstChapter) await selectDialogChapter(firstChapter)
+    const coverChapter = mode === 'cover'
+      ? comicImageDialog.chapters.find((chapter) => chapterContainsPath(chapter, comic.coverPath))
+      : null
+    const targetChapter = coverChapter || comicImageDialog.chapters[0]
+    if (targetChapter) await selectDialogChapter(targetChapter)
     else comicImageDialog.pageLoading = false
   } catch (e) {
     message.value = e.message || '漫画图片加载失败'
@@ -610,7 +864,21 @@ const chooseCoverPage = async (page) => {
 }
 
 const previewPage = (page) => {
-  previewImage.value = { path: page.filePath, name: page.name }
+  openPreview(
+    { path: page.filePath, name: page.name },
+    comicImageDialog.pages.map((item) => ({ path: item.filePath, name: item.name }))
+  )
+}
+
+const isCurrentComicCover = (page) => {
+  return normalizedPath(page?.filePath) === normalizedPath(comicImageDialog.comic?.coverPath)
+}
+
+const openDialogPageContextMenu = (event, page) => {
+  showContextMenu(event, page.name, [
+    { label: '预览图片', action: () => previewPage(page) },
+    { label: isCurrentComicCover(page) ? '已是当前封面' : '设为漫画封面', disabled: isCurrentComicCover(page), action: () => chooseCoverPage(page) }
+  ])
 }
 
 const persistCategoryOrder = async () => {
@@ -634,6 +902,22 @@ const moveCategory = async (index, direction) => {
     categories.value = await fetchCategories().catch(() => categories.value)
     message.value = e.message || '分类排序保存失败'
   }
+}
+
+const openCategoryListContextMenu = (event) => {
+  if (activeTab.value !== 'categories') return
+  showContextMenu(event, '分类管理', [
+    { label: '新增分类', action: () => openCreateCategoryDialog() }
+  ])
+}
+
+const openCategoryContextMenu = (event, category, index) => {
+  showContextMenu(event, category.name, [
+    { label: '新增分类', action: () => openCreateCategoryDialog() },
+    { label: '上移', disabled: index === 0, action: () => moveCategory(index, -1) },
+    { label: '下移', disabled: index === categories.value.length - 1, action: () => moveCategory(index, 1) },
+    { label: '删除分类', danger: true, action: () => removeCategory(category) }
+  ])
 }
 
 const categoryNameExists = (name) => {
@@ -698,5 +982,31 @@ const removeCategory = async (category) => {
   })
 }
 
-onMounted(loadAll)
+const handleGlobalKeydown = (event) => {
+  if (previewImage.value && event.key === 'ArrowLeft') {
+    event.preventDefault()
+    shiftPreview(-1)
+  }
+  if (previewImage.value && event.key === 'ArrowRight') {
+    event.preventDefault()
+    shiftPreview(1)
+  }
+  if (event.key === 'Escape' && previewImage.value) closePreview()
+  if (event.key === 'Escape' && deleteConfirmDialog.open) closeDeleteConfirmDialog()
+  if (event.key === 'Escape') closeContextMenu()
+}
+
+onMounted(() => {
+  loadAll()
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('resize', closeContextMenu)
+  window.addEventListener('scroll', closeContextMenu, true)
+})
+
+onBeforeUnmount(() => {
+  clearDeleteConfirmTimer()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('resize', closeContextMenu)
+  window.removeEventListener('scroll', closeContextMenu, true)
+})
 </script>

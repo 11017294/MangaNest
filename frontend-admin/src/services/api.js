@@ -83,6 +83,10 @@ export const moveFolder = (path, targetParentPath) => request('/admin/folders/mo
 export const deleteFile = (path) => request(`/admin/files?path=${encodeURIComponent(path)}`, {
   method: 'DELETE'
 })
+export const revealFile = (path) => request('/admin/files/reveal', {
+  method: 'POST',
+  body: JSON.stringify({ path })
+})
 export const setFolderCover = (folderPath, imagePath) => request('/admin/folders/cover', {
   method: 'POST',
   body: JSON.stringify({ folderPath, imagePath })
