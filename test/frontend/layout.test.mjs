@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const readerCss = fs.readFileSync(new URL('../../frontend/src/style.css', import.meta.url), 'utf8')
 const readerView = fs.readFileSync(new URL('../../frontend/src/views/Reader.vue', import.meta.url), 'utf8')
+const comicDetailView = fs.readFileSync(new URL('../../frontend/src/views/ComicDetail.vue', import.meta.url), 'utf8')
 const adminApp = fs.readFileSync(new URL('../../frontend-admin/src/App.vue', import.meta.url), 'utf8')
 
 const getRuleBody = (selector) => {
@@ -24,6 +25,12 @@ test('reader chrome returns to comic detail without manual save or cover actions
   assert.match(readerView, /\/comic\/\$\{chapter\.comicId\}/)
   assert.doesNotMatch(readerView, /保存进度/)
   assert.doesNotMatch(readerView, /设封面/)
+})
+
+test('comic detail favorite toggle preserves loaded chapters and metadata', () => {
+  assert.match(comicDetailView, /const updated = await setComicFavorite/)
+  assert.match(comicDetailView, /comic\.value = \{\s*\.\.\.comic\.value,\s*\.\.\.updated\s*\}/s)
+  assert.doesNotMatch(comicDetailView, /comic\.value = await setComicFavorite/)
 })
 
 test('admin comics tab uses menu navigation and index-focused bulk actions', () => {

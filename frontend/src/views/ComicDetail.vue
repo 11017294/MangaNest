@@ -92,6 +92,10 @@ onMounted(async () => {
 
 const toggleFavorite = async () => {
   if (!comic.value) return
-  comic.value = await setComicFavorite(comic.value.id, !comic.value.favorite)
+  const updated = await setComicFavorite(comic.value.id, !comic.value.favorite)
+  comic.value = {
+    ...comic.value,
+    ...updated
+  }
 }
 </script>
