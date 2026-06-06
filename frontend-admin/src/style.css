@@ -375,6 +375,27 @@ input {
   word-break: break-all;
 }
 
+.library-structure-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(17, 24, 33, 0.72);
+}
+
+.library-structure-note strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.library-structure-note span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .library-controls {
   display: grid;
   gap: 10px;

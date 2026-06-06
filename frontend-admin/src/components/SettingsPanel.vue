@@ -9,6 +9,10 @@
         <span class="eyebrow">Library Root</span>
         <h1>漫画库根目录</h1>
         <p>{{ libraryPath || libraryPathDraft || '还没有设置漫画库根目录' }}</p>
+        <div class="library-structure-note">
+          <strong>分组扫描模式</strong>
+          <span>根目录第一层作为管理分组，第二层开始识别漫画；没有系列的漫画可以放入“未分组”等目录。</span>
+        </div>
       </div>
       <div class="library-controls">
         <label>

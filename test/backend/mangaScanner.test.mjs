@@ -15,17 +15,17 @@ const writeFile = (filePath) => {
 
 test('scanMangaLibrary discovers comics chapters pages and cover images', async () => {
   const root = makeTempLibrary()
-  writeFile(path.join(root, 'Comic A', 'cover.jpg'))
-  writeFile(path.join(root, 'Comic A', '第2话', '002.jpg'))
-  writeFile(path.join(root, 'Comic A', '第2话', '001.jpg'))
-  writeFile(path.join(root, 'Comic A', '第10话', '001.webp'))
-  writeFile(path.join(root, 'Comic A', '第10话', 'note.txt'))
+  writeFile(path.join(root, 'Series 1', 'Comic A', 'cover.jpg'))
+  writeFile(path.join(root, 'Series 1', 'Comic A', '第2话', '002.jpg'))
+  writeFile(path.join(root, 'Series 1', 'Comic A', '第2话', '001.jpg'))
+  writeFile(path.join(root, 'Series 1', 'Comic A', '第10话', '001.webp'))
+  writeFile(path.join(root, 'Series 1', 'Comic A', '第10话', 'note.txt'))
 
   const result = await scanMangaLibrary(root)
 
   assert.equal(result.comics.length, 1)
   assert.equal(result.comics[0].title, 'Comic A')
-  assert.equal(result.comics[0].coverPath, 'Comic A/cover.jpg')
+  assert.equal(result.comics[0].coverPath, 'Series 1/Comic A/cover.jpg')
   assert.deepEqual(result.comics[0].chapters.map((chapter) => chapter.title), ['第2话', '第10话'])
   assert.deepEqual(result.comics[0].chapters[0].pages.map((page) => page.name), ['001.jpg', '002.jpg'])
   assert.equal(result.comics[0].chapters[1].pages.length, 1)
@@ -33,18 +33,18 @@ test('scanMangaLibrary discovers comics chapters pages and cover images', async 
 
 test('scanMangaLibrary falls back to first chapter page when cover is missing', async () => {
   const root = makeTempLibrary()
-  writeFile(path.join(root, 'Comic B', '001', '0001.png'))
+  writeFile(path.join(root, 'Series 1', 'Comic B', '001', '0001.png'))
 
   const result = await scanMangaLibrary(root)
 
-  assert.equal(result.comics[0].coverPath, 'Comic B/001/0001.png')
+  assert.equal(result.comics[0].coverPath, 'Series 1/Comic B/001/0001.png')
 })
 
 test('scanMangaLibrary treats a comic folder with direct images as a single chapter comic', async () => {
   const root = makeTempLibrary()
-  writeFile(path.join(root, 'chapter_04', '41038.webp'))
-  writeFile(path.join(root, 'chapter_04', '41039.webp'))
-  writeFile(path.join(root, 'chapter_05', '41058.webp'))
+  writeFile(path.join(root, 'Short Stories', 'chapter_04', '41038.webp'))
+  writeFile(path.join(root, 'Short Stories', 'chapter_04', '41039.webp'))
+  writeFile(path.join(root, 'Short Stories', 'chapter_05', '41058.webp'))
   writeFile(path.join(root, 'note.txt'))
 
   const result = await scanMangaLibrary(root)
@@ -53,13 +53,24 @@ test('scanMangaLibrary treats a comic folder with direct images as a single chap
   assert.deepEqual(result.comics.map((comic) => comic.title), ['chapter_04', 'chapter_05'])
   assert.deepEqual(result.comics[0].chapters.map((chapter) => chapter.title), ['默认章节'])
   assert.deepEqual(result.comics[0].chapters[0].pages.map((page) => page.name), ['41038.webp', '41039.webp'])
-  assert.equal(result.comics[0].coverPath, 'chapter_04/41038.webp')
+  assert.equal(result.comics[0].coverPath, 'Short Stories/chapter_04/41038.webp')
+})
+
+test('scanMangaLibrary treats the first directory level as groups by default', async () => {
+  const root = makeTempLibrary()
+  writeFile(path.join(root, 'Root Comic', '001.jpg'))
+  writeFile(path.join(root, 'Ungrouped', 'Nested Comic', '001.jpg'))
+
+  const result = await scanMangaLibrary(root)
+
+  assert.deepEqual(result.comics.map((comic) => comic.title), ['Nested Comic'])
+  assert.equal(result.comics[0].sourcePath, 'Ungrouped/Nested Comic')
 })
 
 test('scanMangaLibrary includes page dimensions when they are readable', async () => {
   const root = makeTempLibrary()
-  writeFile(path.join(root, 'Comic C', '001', '0001.png'))
-  fs.writeFileSync(path.join(root, 'Comic C', '001', '0001.png'), Buffer.from([
+  writeFile(path.join(root, 'Series 1', 'Comic C', '001', '0001.png'))
+  fs.writeFileSync(path.join(root, 'Series 1', 'Comic C', '001', '0001.png'), Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     0x00, 0x00, 0x00, 0x0d,
     0x49, 0x48, 0x44, 0x52,
@@ -76,7 +87,9 @@ test('scanMangaLibrary includes page dimensions when they are readable', async (
 
 test('scanMangaLibrary discovers CBZ archive chapters', async () => {
   const root = makeTempLibrary()
-  const source = path.join(root, 'Comic D', 'cbz-source')
+  const source = path.join(root, 'Series 1', 'Comic D', 'cbz-source')
+  const zipPath = path.join(root, 'Series 1', 'Comic D', '001.zip')
+  const cbzPath = path.join(root, 'Series 1', 'Comic D', '001.cbz')
   fs.mkdirSync(source, { recursive: true })
   fs.writeFileSync(path.join(source, '0001.png'), Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -89,14 +102,15 @@ test('scanMangaLibrary discovers CBZ archive chapters', async () => {
   execFileSync('powershell', [
     '-NoProfile',
     '-Command',
-    `Compress-Archive -Path '${source}\\*' -DestinationPath '${path.join(root, 'Comic D', '001.cbz')}'`
+    `Compress-Archive -Path '${source}\\*' -DestinationPath '${zipPath}'`
   ])
+  fs.renameSync(zipPath, cbzPath)
   fs.rmSync(source, { recursive: true, force: true })
 
   const result = await scanMangaLibrary(root)
 
   assert.equal(result.comics[0].chapters[0].type, 'archive')
-  assert.equal(result.comics[0].chapters[0].pages[0].filePath, 'Comic D/001.cbz#0001.png')
+  assert.equal(result.comics[0].chapters[0].pages[0].filePath, 'Series 1/Comic D/001.cbz#0001.png')
   assert.equal(result.comics[0].chapters[0].pages[0].width, 300)
   assert.equal(result.comics[0].chapters[0].pages[0].height, 400)
 })

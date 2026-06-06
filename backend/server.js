@@ -197,8 +197,8 @@ const serializeComic = (comic) => {
     };
 };
 
-const rebuildMangaIndex = async (libraryPath) => {
-    const result = await scanMangaLibrary(libraryPath);
+const rebuildMangaIndex = async (libraryPath, options = {}) => {
+    const result = await scanMangaLibrary(libraryPath, options);
     const existingComics = await Comic.findAll({
         include: [{ model: Category, as: 'categories', required: false }]
     });
@@ -341,10 +341,12 @@ app.post('/api/library/scan', async (req, res) => {
         }
 
         await setSettingValue('libraryPath', libraryPath);
-        const result = await rebuildMangaIndex(libraryPath);
+        const rootMode = req.body?.rootMode || 'grouped';
+        const result = await rebuildMangaIndex(libraryPath, { rootMode });
         res.json({
             success: true,
             libraryPath,
+            rootMode,
             comicCount: result.comics.length,
             chapterCount: result.comics.reduce((sum, comic) => sum + comic.chapters.length, 0),
             pageCount: result.comics.reduce((sum, comic) => {

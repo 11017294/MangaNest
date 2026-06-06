@@ -150,20 +150,36 @@ const buildComic = async (libraryRoot, comicPath, title, sourcePath, sortOrder) 
   }
 }
 
-export const scanMangaLibrary = async (libraryRoot) => {
+const scanComicDirectories = async (libraryRoot, parentPath, comics) => {
+  const comicEntries = safeReadDir(parentPath)
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => naturalCompare(a.name, b.name))
+
+  for (const entry of comicEntries) {
+    const comicPath = path.join(parentPath, entry.name)
+    const comic = await buildComic(libraryRoot, comicPath, entry.name, toRelativePath(libraryRoot, comicPath), comics.length)
+    if (comic.chapters.length > 0) comics.push(comic)
+  }
+}
+
+export const scanMangaLibrary = async (libraryRoot, options = {}) => {
+  const rootMode = options.rootMode || 'grouped'
   const root = path.resolve(libraryRoot)
   if (!fs.existsSync(root)) return { comics: [] }
 
-  const comicEntries = safeReadDir(root)
-    .filter((entry) => entry.isDirectory())
-    .sort((a, b) => naturalCompare(a.name, b.name))
   const comics = []
 
-  for (let sortOrder = 0; sortOrder < comicEntries.length; sortOrder += 1) {
-    const entry = comicEntries[sortOrder]
-    const comicPath = path.join(root, entry.name)
-    const comic = await buildComic(root, comicPath, entry.name, toRelativePath(root, comicPath), sortOrder)
-    if (comic.chapters.length > 0) comics.push(comic)
+  if (rootMode === 'flat') {
+    await scanComicDirectories(root, root, comics)
+    return { comics }
+  }
+
+  const groupEntries = safeReadDir(root)
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => naturalCompare(a.name, b.name))
+
+  for (const entry of groupEntries) {
+    await scanComicDirectories(root, path.join(root, entry.name), comics)
   }
 
   return { comics }
