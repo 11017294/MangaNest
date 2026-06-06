@@ -110,6 +110,12 @@
       @update:sort-order="createCategoryDialog.sortOrder = $event"
     />
 
+    <ConfirmDialog
+      :dialog="confirmDialog"
+      @cancel="cancelConfirmDialog"
+      @confirm="acceptConfirmDialog"
+    />
+
     <ContextMenu :menu="contextMenu" @run="runContextAction" />
     <AdminMessage :messages="messages" @close="removeMessage" />
   </main>
@@ -123,12 +129,14 @@ import CategoryDialog from './components/CategoryDialog.vue'
 import CategoryManagerPanel from './components/CategoryManagerPanel.vue'
 import ComicImageDialog from './components/ComicImageDialog.vue'
 import ComicManagerPanel from './components/ComicManagerPanel.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import ContextMenu from './components/ContextMenu.vue'
 import CreateCategoryDialog from './components/CreateCategoryDialog.vue'
 import DeleteConfirmDialog from './components/DeleteConfirmDialog.vue'
 import FileManagerPanel from './components/FileManagerPanel.vue'
 import ImagePreview from './components/ImagePreview.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import { useConfirmDialog } from './composables/useConfirmDialog'
 import { useContextMenu } from './composables/useContextMenu'
 import { useDeleteConfirm } from './composables/useDeleteConfirm'
 import { useImagePreview } from './composables/useImagePreview'
@@ -192,6 +200,7 @@ const folder = reactive({
   images: []
 })
 const { messages, notifyError, notifySuccess, removeMessage } = useMessages()
+const { acceptConfirmDialog, cancelConfirmDialog, confirm, confirmDialog } = useConfirmDialog()
 const { closeContextMenu, contextMenu, runContextAction, showContextMenu } = useContextMenu({ onError: notifyError })
 const { closeDeleteConfirmDialog, deleteConfirmDialog, openDeleteConfirmDialog } = useDeleteConfirm()
 const {
@@ -307,7 +316,16 @@ const startDragFolder = (dir) => {
 
 const dropFolder = async (targetDir) => {
   if (!draggedFolder.value || draggedFolder.value.path === targetDir.path) return
-  if (!confirm(`将目录“${draggedFolder.value.name}”移动到“${targetDir.name}”下？`)) return
+  const confirmed = await confirm({
+    title: '移动目录',
+    message: `将目录“${draggedFolder.value.name}”移动到“${targetDir.name}”下？`,
+    detail: '移动后建议重新扫描索引，以同步漫画库结构。',
+    confirmText: '确定移动'
+  })
+  if (!confirmed) {
+    draggedFolder.value = null
+    return
+  }
   try {
     await moveFolder(draggedFolder.value.path, targetDir.path)
     notifySuccess('目录已移动，建议重新扫描索引')
@@ -439,7 +457,14 @@ const toggleCategoryDialogSelection = (categoryId, checked) => {
 }
 
 const removeComicIndex = async (comic) => {
-  if (!confirm(`只删除索引，不删除磁盘文件：${comic.title}？`)) return
+  const confirmed = await confirm({
+    title: '删除索引',
+    message: `只删除索引，不删除磁盘文件：${comic.title}？`,
+    detail: '磁盘上的漫画文件会保留，重新扫描后可能再次生成索引。',
+    confirmText: '删除索引',
+    danger: true
+  })
+  if (!confirmed) return
   try {
     await deleteComicIndex(comic.id)
     comics.value = comics.value.filter((item) => item.id !== comic.id)
@@ -479,7 +504,14 @@ const toggleAllFilteredComics = (checked) => {
 const removeSelectedComicIndexes = async () => {
   const ids = [...selectedComicIds.value]
   if (!ids.length) return
-  if (!confirm(`只删除 ${ids.length} 个漫画索引，不删除磁盘文件？`)) return
+  const confirmed = await confirm({
+    title: '批量删除索引',
+    message: `只删除 ${ids.length} 个漫画索引，不删除磁盘文件？`,
+    detail: '磁盘上的漫画文件会保留，重新扫描后可能再次生成索引。',
+    confirmText: '批量删除',
+    danger: true
+  })
+  if (!confirmed) return
   try {
     await Promise.all(ids.map((id) => deleteComicIndex(id)))
     comics.value = comics.value.filter((comic) => !ids.includes(comic.id))
@@ -677,7 +709,14 @@ const renameCategory = async (category, name) => {
 }
 
 const removeCategory = async (category) => {
-  if (!confirm(`删除分类“${category.name}”？`)) return
+  const confirmed = await confirm({
+    title: '删除分类',
+    message: `删除分类“${category.name}”？`,
+    detail: '只会删除分类关系，不会删除漫画或磁盘文件。',
+    confirmText: '删除分类',
+    danger: true
+  })
+  if (!confirmed) return
   try {
     await deleteCategory(category.id)
     categories.value = categories.value.filter((item) => item.id !== category.id)
@@ -701,6 +740,7 @@ const handleGlobalKeydown = (event) => {
   }
   if (event.key === 'Escape' && previewImage.value) closePreview()
   if (event.key === 'Escape' && deleteConfirmDialog.open) closeDeleteConfirmDialog()
+  if (event.key === 'Escape' && confirmDialog.open) cancelConfirmDialog()
   if (event.key === 'Escape') closeContextMenu()
 }
 

@@ -203,6 +203,11 @@ input {
   color: #08231f;
 }
 
+.primary-button.danger-confirm {
+  background: var(--danger);
+  color: #2a0710;
+}
+
 .secondary-button,
 .folder-nav button,
 .breadcrumbs button,
@@ -851,6 +856,51 @@ input {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.confirm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(5, 8, 12, 0.72);
+}
+
+.confirm-dialog {
+  width: min(460px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(85, 214, 190, 0.28);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.36);
+}
+
+.confirm-dialog-body {
+  display: grid;
+  gap: 10px;
+  padding: 15px;
+}
+
+.confirm-dialog-body p {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.confirm-dialog-body small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.confirm-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .image-dialog-overlay {
