@@ -40,6 +40,7 @@
           :value="dir.name"
           class="name-input"
           @change="$emit('rename', dir.path, $event.target.value)"
+          @dragstart.stop
         />
       </article>
 
@@ -56,6 +57,7 @@
           :value="image.name"
           class="name-input"
           @change="$emit('rename', image.path, $event.target.value)"
+          @dragstart.stop
         />
       </article>
     </div>
