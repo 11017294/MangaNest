@@ -19,8 +19,10 @@ import {
     initDB
 } from './db.js';
 import { scanMangaLibrary } from './mangaScanner.js';
+import { pathsOverlap, replacePathPrefix } from './pathIndexSync.js';
 import { readArchiveEntryBuffer } from './archiveReader.js';
 import { sortRankedComics } from './ranking.js';
+import { logError, logInfo, requestLogger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,6 +32,7 @@ const PORT = 3001;
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 
 // Base image directory
 const IMAGE_DIR = 'E:\\pagefile';
@@ -151,7 +154,7 @@ const resolveLibraryRelativePath = async (relativePath = '') => {
 
 const sendAdminError = (res, error, fallback = 'Operation failed') => {
     const status = error?.status || 500;
-    if (status >= 500) console.error(fallback, error);
+    if (status >= 500) logError(fallback, error);
     res.status(status).json({ error: error?.message || fallback });
 };
 
@@ -268,6 +271,306 @@ const rebuildMangaIndex = async (libraryPath, options = {}) => {
     return result;
 };
 
+const syncMovedFolderIndex = async (oldPath, newPath) => {
+    const normalizedOldPath = normalizeRelativePath(oldPath);
+    const normalizedNewPath = normalizeRelativePath(newPath);
+    if (!normalizedOldPath || !normalizedNewPath) return { comics: 0, chapters: 0, pages: 0, folderMetadata: 0 };
+
+    const Op = sequelize.Sequelize.Op;
+    const pathPrefixFilter = (field) => ({
+        [Op.or]: [
+            { [field]: normalizedOldPath },
+            { [field]: { [Op.like]: `${normalizedOldPath}/%` } }
+        ]
+    });
+
+    const counts = { comics: 0, chapters: 0, pages: 0, folderMetadata: 0 };
+
+    await sequelize.transaction(async (transaction) => {
+        const comics = await Comic.findAll({
+            where: {
+                [Op.or]: [
+                    pathPrefixFilter('sourcePath'),
+                    pathPrefixFilter('coverPath')
+                ]
+            },
+            transaction
+        });
+        for (const comic of comics) {
+            const nextSourcePath = replacePathPrefix(comic.sourcePath, normalizedOldPath, normalizedNewPath);
+            const nextCoverPath = comic.coverPath ? replacePathPrefix(comic.coverPath, normalizedOldPath, normalizedNewPath) : comic.coverPath;
+            if (nextSourcePath !== comic.sourcePath || nextCoverPath !== comic.coverPath) {
+                comic.sourcePath = nextSourcePath;
+                comic.coverPath = nextCoverPath;
+                await comic.save({ transaction });
+                counts.comics += 1;
+            }
+        }
+
+        const chapters = await Chapter.findAll({ where: pathPrefixFilter('path'), transaction });
+        for (const chapter of chapters) {
+            const nextPath = replacePathPrefix(chapter.path, normalizedOldPath, normalizedNewPath);
+            if (nextPath !== chapter.path) {
+                chapter.path = nextPath;
+                await chapter.save({ transaction });
+                counts.chapters += 1;
+            }
+        }
+
+        const pages = await Page.findAll({ where: pathPrefixFilter('filePath'), transaction });
+        for (const page of pages) {
+            const nextFilePath = replacePathPrefix(page.filePath, normalizedOldPath, normalizedNewPath);
+            if (nextFilePath !== page.filePath) {
+                page.filePath = nextFilePath;
+                await page.save({ transaction });
+                counts.pages += 1;
+            }
+        }
+
+        const folderMetadataRows = await FolderMetadata.findAll({
+            where: {
+                [Op.or]: [
+                    pathPrefixFilter('path'),
+                    pathPrefixFilter('coverImage')
+                ]
+            },
+            transaction
+        });
+        for (const metadata of folderMetadataRows) {
+            const nextPath = replacePathPrefix(metadata.path, normalizedOldPath, normalizedNewPath);
+            const nextCoverImage = metadata.coverImage
+                ? replacePathPrefix(metadata.coverImage, normalizedOldPath, normalizedNewPath)
+                : metadata.coverImage;
+            if (nextPath !== metadata.path || nextCoverImage !== metadata.coverImage) {
+                const values = {
+                    coverImage: nextCoverImage,
+                    note: metadata.note
+                };
+                if (nextPath !== metadata.path) {
+                    await FolderMetadata.destroy({ where: { path: metadata.path }, transaction });
+                    await FolderMetadata.upsert({ path: nextPath, ...values }, { transaction });
+                } else {
+                    metadata.coverImage = nextCoverImage;
+                    await metadata.save({ transaction });
+                }
+                counts.folderMetadata += 1;
+            }
+        }
+    });
+
+    return counts;
+};
+
+let folderIndexSyncJobId = 0;
+let folderIndexSyncQueue = Promise.resolve();
+const folderIndexSyncLocks = new Map();
+
+const getFolderIndexSyncConflict = (oldPath, newPath) => {
+    const paths = [normalizeRelativePath(oldPath), normalizeRelativePath(newPath)].filter(Boolean);
+    return [...folderIndexSyncLocks.values()].find((job) => {
+        return paths.some((targetPath) => (
+            pathsOverlap(targetPath, job.oldPath) || pathsOverlap(targetPath, job.newPath)
+        ));
+    });
+};
+
+const acquireFolderIndexSyncLock = (oldPath, newPath) => {
+    const normalizedOldPath = normalizeRelativePath(oldPath);
+    const normalizedNewPath = normalizeRelativePath(newPath);
+    const conflict = getFolderIndexSyncConflict(normalizedOldPath, normalizedNewPath);
+    if (conflict) {
+        const error = new Error('目录索引正在同步，请稍后再试');
+        error.status = 409;
+        error.syncJobId = conflict.id;
+        throw error;
+    }
+
+    const job = {
+        id: `folder-index-sync-${++folderIndexSyncJobId}`,
+        oldPath: normalizedOldPath,
+        newPath: normalizedNewPath,
+        status: 'queued',
+        createdAt: new Date().toISOString()
+    };
+    folderIndexSyncLocks.set(job.id, job);
+    return job;
+};
+
+const releaseFolderIndexSyncLock = (job) => {
+    folderIndexSyncLocks.delete(job.id);
+};
+
+const enqueueMovedFolderIndexSync = (job) => {
+    const runJob = async () => {
+        job.status = 'running';
+        logInfo('admin folder index sync started', { jobId: job.id, from: job.oldPath, to: job.newPath });
+        try {
+            const counts = await syncMovedFolderIndex(job.oldPath, job.newPath);
+            job.status = 'completed';
+            logInfo('admin folder index sync completed', { jobId: job.id, from: job.oldPath, to: job.newPath, counts });
+        } catch (error) {
+            job.status = 'failed';
+            logError('admin folder index sync failed', error, { jobId: job.id, from: job.oldPath, to: job.newPath });
+        } finally {
+            releaseFolderIndexSyncLock(job);
+        }
+    };
+
+    folderIndexSyncQueue = folderIndexSyncQueue.then(runJob, runJob);
+    return { id: job.id, status: job.status };
+};
+
+const syncMovedFileIndex = async (oldPath, newPath) => {
+    const normalizedOldPath = normalizeRelativePath(oldPath);
+    const normalizedNewPath = normalizeRelativePath(newPath);
+    if (!normalizedOldPath || !normalizedNewPath) return { comics: 0, chapters: 0, pages: 0, folderMetadata: 0 };
+
+    const Op = sequelize.Sequelize.Op;
+    const fileReferenceFilter = (field) => ({
+        [Op.or]: [
+            { [field]: normalizedOldPath },
+            { [field]: { [Op.like]: `${normalizedOldPath}#%` } }
+        ]
+    });
+    const counts = { comics: 0, chapters: 0, pages: 0, folderMetadata: 0 };
+
+    await sequelize.transaction(async (transaction) => {
+        const comics = await Comic.findAll({
+            where: {
+                [Op.or]: [
+                    { sourcePath: normalizedOldPath },
+                    fileReferenceFilter('coverPath')
+                ]
+            },
+            transaction
+        });
+        for (const comic of comics) {
+            const nextSourcePath = replacePathPrefix(comic.sourcePath, normalizedOldPath, normalizedNewPath);
+            const nextCoverPath = comic.coverPath
+                ? replacePathPrefix(comic.coverPath, normalizedOldPath, normalizedNewPath)
+                : comic.coverPath;
+            if (nextSourcePath !== comic.sourcePath || nextCoverPath !== comic.coverPath) {
+                comic.sourcePath = nextSourcePath;
+                comic.coverPath = nextCoverPath;
+                await comic.save({ transaction });
+                counts.comics += 1;
+            }
+        }
+
+        const chapters = await Chapter.findAll({ where: { path: normalizedOldPath }, transaction });
+        for (const chapter of chapters) {
+            chapter.path = normalizedNewPath;
+            await chapter.save({ transaction });
+            counts.chapters += 1;
+        }
+
+        const pages = await Page.findAll({ where: fileReferenceFilter('filePath'), transaction });
+        for (const page of pages) {
+            page.filePath = replacePathPrefix(page.filePath, normalizedOldPath, normalizedNewPath);
+            await page.save({ transaction });
+            counts.pages += 1;
+        }
+
+        const folderMetadataRows = await FolderMetadata.findAll({ where: fileReferenceFilter('coverImage'), transaction });
+        for (const metadata of folderMetadataRows) {
+            metadata.coverImage = replacePathPrefix(metadata.coverImage, normalizedOldPath, normalizedNewPath);
+            await metadata.save({ transaction });
+            counts.folderMetadata += 1;
+        }
+    });
+
+    return counts;
+};
+
+const moveAdminPath = async (sourcePath, targetParentPath, options = {}) => {
+    const source = await resolveLibraryRelativePath(sourcePath || '');
+    const targetParent = await resolveLibraryRelativePath(targetParentPath || '');
+    if (!source.relativePath) {
+        const error = new Error('Cannot move manga library root');
+        error.status = 403;
+        throw error;
+    }
+    if (!fs.existsSync(source.fullPath)) {
+        const error = new Error('Source path not found');
+        error.status = 404;
+        throw error;
+    }
+    if (!fs.existsSync(targetParent.fullPath)) {
+        const error = new Error('Target folder not found');
+        error.status = 404;
+        throw error;
+    }
+    if (!fs.statSync(targetParent.fullPath).isDirectory()) {
+        const error = new Error('Target path is not a folder');
+        error.status = 400;
+        throw error;
+    }
+
+    const sourceStat = fs.statSync(source.fullPath);
+    if (options.expectedType === 'folder' && !sourceStat.isDirectory()) {
+        const error = new Error('Source path is not a folder');
+        error.status = 400;
+        throw error;
+    }
+    if (options.expectedType === 'file' && !sourceStat.isFile()) {
+        const error = new Error('Source path is not a file');
+        error.status = 400;
+        throw error;
+    }
+    if (sourceStat.isDirectory()
+        && (targetParent.fullPath === source.fullPath || isInsideBase(targetParent.fullPath, source.fullPath))) {
+        const error = new Error('Cannot move a folder into itself');
+        error.status = 400;
+        throw error;
+    }
+
+    const targetPath = path.resolve(targetParent.fullPath, path.basename(source.fullPath));
+    if (!isInsideBase(targetPath, source.libraryPath)) {
+        const error = new Error('Target path is outside manga library');
+        error.status = 403;
+        throw error;
+    }
+    if (targetPath === source.fullPath) {
+        const error = new Error('Source and target are the same path');
+        error.status = 400;
+        throw error;
+    }
+    if (fs.existsSync(targetPath)) {
+        const error = new Error('Target name already exists');
+        error.status = 400;
+        throw error;
+    }
+
+    const newPath = path.relative(source.libraryPath, targetPath).replace(/\\/g, '/');
+    if (sourceStat.isDirectory()) {
+        const syncJob = acquireFolderIndexSyncLock(source.relativePath, newPath);
+        try {
+            fs.renameSync(source.fullPath, targetPath);
+        } catch (error) {
+            releaseFolderIndexSyncLock(syncJob);
+            throw error;
+        }
+        const indexSync = enqueueMovedFolderIndexSync(syncJob);
+        return {
+            path: newPath,
+            type: 'folder',
+            requiresScan: false,
+            requiresIndexRefresh: true,
+            indexSync
+        };
+    }
+
+    fs.renameSync(source.fullPath, targetPath);
+    const indexSync = await syncMovedFileIndex(source.relativePath, newPath);
+    return {
+        path: newPath,
+        type: 'file',
+        requiresScan: false,
+        requiresIndexRefresh: false,
+        indexSync
+    };
+};
+
 // Helper: Convert flat list to tree
 const buildMenuTree = (menus, parentId = null) => {
     return menus
@@ -342,19 +645,32 @@ app.post('/api/library/scan', async (req, res) => {
 
         await setSettingValue('libraryPath', libraryPath);
         const rootMode = req.body?.rootMode || 'grouped';
+        const startedAt = Date.now();
+        logInfo('library scan started', { libraryPath, rootMode });
         const result = await rebuildMangaIndex(libraryPath, { rootMode });
+        const comicCount = result.comics.length;
+        const chapterCount = result.comics.reduce((sum, comic) => sum + comic.chapters.length, 0);
+        const pageCount = result.comics.reduce((sum, comic) => {
+            return sum + comic.chapters.reduce((chapterSum, chapter) => chapterSum + chapter.pages.length, 0);
+        }, 0);
+        logInfo('library scan completed', {
+            libraryPath,
+            rootMode,
+            comicCount,
+            chapterCount,
+            pageCount,
+            durationMs: Date.now() - startedAt
+        });
         res.json({
             success: true,
             libraryPath,
             rootMode,
-            comicCount: result.comics.length,
-            chapterCount: result.comics.reduce((sum, comic) => sum + comic.chapters.length, 0),
-            pageCount: result.comics.reduce((sum, comic) => {
-                return sum + comic.chapters.reduce((chapterSum, chapter) => chapterSum + chapter.pages.length, 0);
-            }, 0)
+            comicCount,
+            chapterCount,
+            pageCount
         });
     } catch (error) {
-        console.error('Error scanning manga library:', error);
+        logError('Error scanning manga library:', error);
         res.status(500).json({ error: 'Failed to scan manga library', detail: error?.message || String(error) });
     }
 });
@@ -364,7 +680,7 @@ app.get('/api/categories', async (req, res) => {
         const categories = await Category.findAll({ order: [['sortOrder', 'ASC'], ['name', 'ASC']] });
         res.json(categories);
     } catch (error) {
-        console.error('Error fetching categories:', error);
+        logError('Error fetching categories:', error);
         res.status(500).json({ error: 'Failed to fetch categories' });
     }
 });
@@ -385,9 +701,10 @@ app.post('/api/categories', async (req, res) => {
             name,
             sortOrder: Number.isFinite(sortOrder) ? sortOrder : count
         });
+        logInfo('category created', { id: category.id, name: category.name });
         res.json(category);
     } catch (error) {
-        console.error('Error creating category:', error);
+        logError('Error creating category:', error);
         res.status(500).json({ error: 'Failed to create category' });
     }
 });
@@ -399,9 +716,10 @@ app.put('/api/categories/:id', async (req, res) => {
         if (req.body.name !== undefined) category.name = String(req.body.name).trim();
         if (req.body.sortOrder !== undefined) category.sortOrder = Number(req.body.sortOrder) || 0;
         await category.save();
+        logInfo('category updated', { id: category.id, name: category.name, sortOrder: category.sortOrder });
         res.json(category);
     } catch (error) {
-        console.error('Error updating category:', error);
+        logError('Error updating category:', error);
         res.status(500).json({ error: 'Failed to update category' });
     }
 });
@@ -410,10 +728,12 @@ app.delete('/api/categories/:id', async (req, res) => {
     try {
         const category = await Category.findByPk(req.params.id);
         if (!category) return res.status(404).json({ error: 'Category not found' });
+        const categoryInfo = { id: category.id, name: category.name };
         await category.destroy();
+        logInfo('category deleted', categoryInfo);
         res.json({ success: true });
     } catch (error) {
-        console.error('Error deleting category:', error);
+        logError('Error deleting category:', error);
         res.status(500).json({ error: 'Failed to delete category' });
     }
 });
@@ -424,9 +744,10 @@ app.put('/api/comics/:id/favorite', async (req, res) => {
         if (!comic) return res.status(404).json({ error: 'Comic not found' });
         comic.favorite = !!req.body.favorite;
         await comic.save();
+        logInfo('comic favorite updated', { id: comic.id, title: comic.title, favorite: comic.favorite });
         res.json(comic);
     } catch (error) {
-        console.error('Error updating favorite:', error);
+        logError('Error updating favorite:', error);
         res.status(500).json({ error: 'Failed to update favorite' });
     }
 });
@@ -441,9 +762,10 @@ app.put('/api/comics/:id/categories', async (req, res) => {
         const updated = await Comic.findByPk(req.params.id, {
             include: [{ model: Category, as: 'categories', required: false }]
         });
+        logInfo('comic categories updated', { id: comic.id, title: comic.title, categoryCount: categories.length });
         res.json(updated);
     } catch (error) {
-        console.error('Error updating comic categories:', error);
+        logError('Error updating comic categories:', error);
         res.status(500).json({ error: 'Failed to update comic categories' });
     }
 });
@@ -456,9 +778,10 @@ app.put('/api/comics/:id/cover', async (req, res) => {
         if (!coverPath) return res.status(400).json({ error: 'coverPath is required' });
         comic.coverPath = coverPath;
         await comic.save();
+        logInfo('comic cover updated', { id: comic.id, title: comic.title, coverPath });
         res.json(comic);
     } catch (error) {
-        console.error('Error updating comic cover:', error);
+        logError('Error updating comic cover:', error);
         res.status(500).json({ error: 'Failed to update comic cover' });
     }
 });
@@ -467,6 +790,7 @@ app.delete('/api/comics/:id', async (req, res) => {
     try {
         const comic = await Comic.findByPk(req.params.id);
         if (!comic) return res.status(404).json({ error: 'Comic not found' });
+        const comicInfo = { id: comic.id, title: comic.title, sourcePath: comic.sourcePath };
         await ReadingProgress.destroy({ where: { comicId: comic.id } });
         await ReadingEvent.destroy({ where: { comicId: comic.id } });
         await sequelize.models.ComicCategory.destroy({ where: { comicId: comic.id } });
@@ -475,9 +799,10 @@ app.delete('/api/comics/:id', async (req, res) => {
         if (chapterIds.length) await Page.destroy({ where: { chapterId: chapterIds } });
         await Chapter.destroy({ where: { comicId: comic.id } });
         await comic.destroy();
+        logInfo('comic index deleted', comicInfo);
         res.json({ success: true });
     } catch (error) {
-        console.error('Error deleting comic index:', error);
+        logError('Error deleting comic index:', error);
         res.status(500).json({ error: 'Failed to delete comic index' });
     }
 });
@@ -534,6 +859,30 @@ app.get('/api/admin/folders', async (req, res) => {
     }
 });
 
+app.post('/api/admin/folders', async (req, res) => {
+    try {
+        const parent = await resolveLibraryRelativePath(req.body?.parentPath || '');
+        const name = String(req.body?.name || '').trim();
+        if (!name) return res.status(400).json({ error: 'Folder name is required' });
+        if (name.includes('/') || name.includes('\\')) {
+            return res.status(400).json({ error: 'Folder name cannot contain path separators' });
+        }
+        if (!fs.existsSync(parent.fullPath)) return res.status(404).json({ error: 'Parent folder not found' });
+        if (!fs.statSync(parent.fullPath).isDirectory()) return res.status(400).json({ error: 'Parent path is not a folder' });
+
+        const targetPath = path.resolve(parent.fullPath, name);
+        if (!isInsideBase(targetPath, parent.libraryPath)) return res.status(403).json({ error: 'Target path is outside manga library' });
+        if (fs.existsSync(targetPath)) return res.status(400).json({ error: 'Folder already exists' });
+
+        fs.mkdirSync(targetPath);
+        const newPath = path.relative(parent.libraryPath, targetPath).replace(/\\/g, '/');
+        logInfo('admin folder created', { path: newPath });
+        res.json({ success: true, path: newPath });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to create admin folder');
+    }
+});
+
 app.post('/api/admin/files/rename', async (req, res) => {
     try {
         const { libraryPath, relativePath, fullPath } = await resolveLibraryRelativePath(req.body?.path || '');
@@ -551,6 +900,7 @@ app.post('/api/admin/files/rename', async (req, res) => {
 
         fs.renameSync(fullPath, targetPath);
         const newPath = path.relative(libraryPath, targetPath).replace(/\\/g, '/');
+        logInfo('admin file renamed', { from: relativePath, to: newPath });
         res.json({ success: true, path: newPath, requiresScan: true });
     } catch (error) {
         sendAdminError(res, error, 'Failed to rename admin file');
@@ -559,26 +909,21 @@ app.post('/api/admin/files/rename', async (req, res) => {
 
 app.post('/api/admin/folders/move', async (req, res) => {
     try {
-        const source = await resolveLibraryRelativePath(req.body?.path || '');
-        const targetParent = await resolveLibraryRelativePath(req.body?.targetParentPath || '');
-        if (!source.relativePath) return res.status(403).json({ error: 'Cannot move manga library root' });
-        if (!fs.existsSync(source.fullPath)) return res.status(404).json({ error: 'Source folder not found' });
-        if (!fs.statSync(source.fullPath).isDirectory()) return res.status(400).json({ error: 'Source path is not a folder' });
-        if (!fs.existsSync(targetParent.fullPath)) return res.status(404).json({ error: 'Target folder not found' });
-        if (!fs.statSync(targetParent.fullPath).isDirectory()) return res.status(400).json({ error: 'Target path is not a folder' });
-        if (targetParent.fullPath === source.fullPath || isInsideBase(targetParent.fullPath, source.fullPath)) {
-            return res.status(400).json({ error: 'Cannot move a folder into itself' });
-        }
-
-        const targetPath = path.resolve(targetParent.fullPath, path.basename(source.fullPath));
-        if (!isInsideBase(targetPath, source.libraryPath)) return res.status(403).json({ error: 'Target path is outside manga library' });
-        if (fs.existsSync(targetPath)) return res.status(400).json({ error: 'Target folder already exists' });
-
-        fs.renameSync(source.fullPath, targetPath);
-        const newPath = path.relative(source.libraryPath, targetPath).replace(/\\/g, '/');
-        res.json({ success: true, path: newPath, requiresScan: true });
+        const result = await moveAdminPath(req.body?.path || '', req.body?.targetParentPath || '', { expectedType: 'folder' });
+        logInfo('admin folder moved', { from: req.body?.path || '', to: result.path, indexSync: result.indexSync });
+        res.json({ success: true, ...result });
     } catch (error) {
         sendAdminError(res, error, 'Failed to move admin folder');
+    }
+});
+
+app.post('/api/admin/files/move', async (req, res) => {
+    try {
+        const result = await moveAdminPath(req.body?.path || '', req.body?.targetParentPath || '');
+        logInfo('admin path moved', { from: req.body?.path || '', to: result.path, type: result.type, indexSync: result.indexSync });
+        res.json({ success: true, ...result });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to move admin path');
     }
 });
 
@@ -594,6 +939,7 @@ app.delete('/api/admin/files', async (req, res) => {
         } else {
             fs.unlinkSync(target.fullPath);
         }
+        logInfo('admin path deleted', { path: target.relativePath, type: stat.isDirectory() ? 'folder' : 'file' });
         res.json({ success: true, requiresScan: true });
     } catch (error) {
         sendAdminError(res, error, 'Failed to delete admin file');
@@ -644,6 +990,7 @@ app.post('/api/admin/folders/cover', async (req, res) => {
             path: folder.relativePath,
             coverImage: image.relativePath
         });
+        logInfo('admin folder cover set', { folderPath: folder.relativePath, coverImage: image.relativePath });
         res.json({ success: true, folderPath: folder.relativePath, coverImage: image.relativePath });
     } catch (error) {
         sendAdminError(res, error, 'Failed to set admin folder cover');
@@ -1405,6 +1752,8 @@ app.get('/api/images', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Access from other devices: http://[your-ip]:${PORT}`);
+    logInfo('server started', {
+        localUrl: `http://localhost:${PORT}`,
+        networkUrl: `http://[your-ip]:${PORT}`
+    });
 });

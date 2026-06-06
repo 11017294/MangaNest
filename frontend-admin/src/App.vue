@@ -12,9 +12,7 @@
     <section class="workspace">
       <section v-if="activeTab === 'files'" class="files-workspace">
         <AdminSidebar
-          :current-path="currentPath"
           :folder="folder"
-          :breadcrumbs="breadcrumbs"
           @open-folder="openFolder"
         />
 
@@ -22,12 +20,15 @@
           :folder="folder"
           :folder-loading="folderLoading"
           :breadcrumbs="breadcrumbs"
+          :selected-paths="selectedFilePaths"
           @context="openFileContextMenu"
-          @drag-start="startDragFolder"
-          @drop-folder="dropFolder"
+          @create-folder="openCreateFolderDialog"
+          @drag-start="startDragItem"
+          @drop-target="dropPathTarget"
           @open-folder="openFolder"
           @preview-image="openFolderImagePreview"
           @rename="renamePath"
+          @select-item="selectFileItem"
         />
       </section>
 
@@ -110,6 +111,13 @@
       @update:sort-order="createCategoryDialog.sortOrder = $event"
     />
 
+    <CreateFolderDialog
+      :dialog="createFolderDialog"
+      @close="closeCreateFolderDialog"
+      @save="saveCreateFolderDialog"
+      @update:name="createFolderDialog.name = $event"
+    />
+
     <ConfirmDialog
       :dialog="confirmDialog"
       @cancel="cancelConfirmDialog"
@@ -132,6 +140,7 @@ import ComicManagerPanel from './components/ComicManagerPanel.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import ContextMenu from './components/ContextMenu.vue'
 import CreateCategoryDialog from './components/CreateCategoryDialog.vue'
+import CreateFolderDialog from './components/CreateFolderDialog.vue'
 import DeleteConfirmDialog from './components/DeleteConfirmDialog.vue'
 import FileManagerPanel from './components/FileManagerPanel.vue'
 import ImagePreview from './components/ImagePreview.vue'
@@ -143,6 +152,7 @@ import { useImagePreview } from './composables/useImagePreview'
 import { useMessages } from './composables/useMessages'
 import {
   createCategory,
+  createFolder,
   deleteCategory,
   deleteComicIndex,
   deleteFile,
@@ -152,6 +162,7 @@ import {
   fetchComics,
   fetchFolder,
   fetchSettings,
+  moveFile,
   moveFolder,
   renameFile,
   revealFile,
@@ -168,7 +179,9 @@ const currentPath = ref('')
 const libraryPathDraft = ref('')
 const scanning = ref(false)
 const folderLoading = ref(false)
-const draggedFolder = ref(null)
+const draggedItem = ref(null)
+const selectedFilePaths = ref([])
+const lastSelectedFilePath = ref('')
 const comicQuery = ref('')
 const comics = ref([])
 const categories = ref([])
@@ -193,6 +206,12 @@ const createCategoryDialog = reactive({
   sortOrder: 0,
   error: '',
   attachToCurrentComic: false
+})
+const createFolderDialog = reactive({
+  open: false,
+  name: '',
+  error: '',
+  submitting: false
 })
 const folder = reactive({
   libraryPath: '',
@@ -227,6 +246,11 @@ const breadcrumbs = computed(() => {
   return crumbs
 })
 
+const fileItems = computed(() => [
+  ...folder.folders.map((item) => ({ ...item, type: 'folder' })),
+  ...folder.images.map((item) => ({ ...item, type: 'image' }))
+])
+
 const filteredComics = computed(() => {
   const query = comicQuery.value.trim().toLowerCase()
   if (!query) return comics.value
@@ -253,6 +277,9 @@ const openFolder = async (path = '') => {
     folder.libraryPath = data.libraryPath || ''
     folder.folders = data.folders || []
     folder.images = data.images || []
+    const availablePaths = new Set([...folder.folders, ...folder.images].map((item) => item.path))
+    selectedFilePaths.value = selectedFilePaths.value.filter((path) => availablePaths.has(path))
+    if (!availablePaths.has(lastSelectedFilePath.value)) lastSelectedFilePath.value = ''
   } catch (e) {
     notifyError(e.message || '目录加载失败')
   } finally {
@@ -310,30 +337,124 @@ const renamePath = async (path, newName) => {
   }
 }
 
-const startDragFolder = (dir) => {
-  draggedFolder.value = dir
+const openCreateFolderDialog = () => {
+  createFolderDialog.open = true
+  createFolderDialog.name = ''
+  createFolderDialog.error = ''
+  createFolderDialog.submitting = false
 }
 
-const dropFolder = async (targetDir) => {
-  if (!draggedFolder.value || draggedFolder.value.path === targetDir.path) return
+const closeCreateFolderDialog = () => {
+  if (createFolderDialog.submitting) return
+  createFolderDialog.open = false
+  createFolderDialog.name = ''
+  createFolderDialog.error = ''
+}
+
+const saveCreateFolderDialog = async () => {
+  const name = createFolderDialog.name.trim()
+  if (!name) {
+    createFolderDialog.error = '请输入文件夹名称'
+    return
+  }
+  createFolderDialog.submitting = true
+  createFolderDialog.error = ''
+  try {
+    await createFolder(currentPath.value, name)
+    notifySuccess('文件夹已创建')
+    createFolderDialog.submitting = false
+    closeCreateFolderDialog()
+    await openFolder(currentPath.value)
+  } catch (e) {
+    createFolderDialog.submitting = false
+    createFolderDialog.error = e.message || '文件夹创建失败'
+  }
+}
+
+const selectFileItem = (event, item) => {
+  const itemPath = item.path
+  const currentItems = fileItems.value
+  if (event.shiftKey && lastSelectedFilePath.value) {
+    const startIndex = currentItems.findIndex((entry) => entry.path === lastSelectedFilePath.value)
+    const endIndex = currentItems.findIndex((entry) => entry.path === itemPath)
+    if (startIndex >= 0 && endIndex >= 0) {
+      const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex]
+      selectedFilePaths.value = currentItems.slice(from, to + 1).map((entry) => entry.path)
+      return
+    }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    selectedFilePaths.value = selectedFilePaths.value.includes(itemPath)
+      ? selectedFilePaths.value.filter((path) => path !== itemPath)
+      : [...selectedFilePaths.value, itemPath]
+    lastSelectedFilePath.value = itemPath
+    return
+  }
+
+  selectedFilePaths.value = [itemPath]
+  lastSelectedFilePath.value = itemPath
+}
+
+const startDragItem = (item, type) => {
+  draggedItem.value = { ...item, type }
+  if (!selectedFilePaths.value.includes(item.path)) {
+    selectedFilePaths.value = [item.path]
+    lastSelectedFilePath.value = item.path
+  }
+}
+
+const getSelectedDragItems = () => {
+  if (!draggedItem.value) return []
+  const selected = fileItems.value.filter((item) => selectedFilePaths.value.includes(item.path))
+  return selected.length ? selected : [draggedItem.value]
+}
+
+const isPathInside = (path, parentPath) => {
+  const normalized = normalizedPath(path)
+  const parent = normalizedPath(parentPath)
+  if (!parent) return !!normalized
+  return normalized === parent || normalized.startsWith(`${parent}/`)
+}
+
+const dropPathTarget = async (targetDir) => {
+  if (!draggedItem.value) return
+  const itemsToMove = getSelectedDragItems()
+  const movableItems = itemsToMove.filter((item) => item.path !== targetDir.path && !(item.type === 'folder' && isPathInside(targetDir.path, item.path)))
+  if (!movableItems.length) {
+    draggedItem.value = null
+    return
+  }
+  const originalPath = currentPath.value
   const confirmed = await confirm({
-    title: '移动目录',
-    message: `将目录“${draggedFolder.value.name}”移动到“${targetDir.name}”下？`,
-    detail: '移动后建议重新扫描索引，以同步漫画库结构。',
+    title: '移动文件',
+    message: movableItems.length === 1
+      ? `将“${movableItems[0].name}”移动到“${targetDir.name}”下？`
+      : `将选中的 ${movableItems.length} 个项目移动到“${targetDir.name}”下？`,
+    detail: '移动后会在后台同步漫画、章节和图片路径索引，同步期间相关目录不能再次移动。',
     confirmText: '确定移动'
   })
   if (!confirmed) {
-    draggedFolder.value = null
+    draggedItem.value = null
     return
   }
   try {
-    await moveFolder(draggedFolder.value.path, targetDir.path)
-    notifySuccess('目录已移动，建议重新扫描索引')
-    await openFolder(currentPath.value)
+    for (const item of movableItems) {
+      if (item.type === 'folder') await moveFolder(item.path, targetDir.path)
+      else await moveFile(item.path, targetDir.path)
+    }
+    selectedFilePaths.value = []
+    lastSelectedFilePath.value = ''
+    notifySuccess(movableItems.length === 1
+      ? `已移动到“${targetDir.name}”`
+      : `已移动 ${movableItems.length} 个项目到“${targetDir.name}”`)
+    await openFolder(originalPath)
   } catch (e) {
-    notifyError(e.message || '目录移动失败')
+    notifyError(e.message || '移动失败')
+    draggedItem.value = null
+    return
   } finally {
-    draggedFolder.value = null
+    draggedItem.value = null
   }
 }
 

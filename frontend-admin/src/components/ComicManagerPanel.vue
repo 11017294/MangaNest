@@ -1,9 +1,5 @@
 <template>
   <section class="panel content-panel">
-    <div class="panel-title">
-      <h2>漫画管理</h2>
-      <span>{{ comics.length }} 本</span>
-    </div>
     <input :value="query" class="search-input" placeholder="搜索漫画标题" @input="$emit('update:query', $event.target.value)" />
     <div class="bulk-toolbar">
       <label class="select-all-control">

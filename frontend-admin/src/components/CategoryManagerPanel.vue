@@ -1,9 +1,5 @@
 <template>
   <section class="panel content-panel" @contextmenu.prevent="$emit('list-context', $event)">
-    <div class="panel-title">
-      <h2>分类管理</h2>
-      <span>{{ categories.length }} 个</span>
-    </div>
     <div class="category-toolbar">
       <button class="primary-button" @click="$emit('create')">新增分类</button>
     </div>

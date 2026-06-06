@@ -72,9 +72,17 @@ export const updateCategory = (id, payload) => request(`/categories/${id}`, {
 export const deleteCategory = (id) => request(`/categories/${id}`, { method: 'DELETE' })
 
 export const fetchFolder = (dir = '') => request(`/admin/folders?dir=${encodeURIComponent(dir)}`)
+export const createFolder = (parentPath, name) => request('/admin/folders', {
+  method: 'POST',
+  body: JSON.stringify({ parentPath, name })
+})
 export const renameFile = (path, newName) => request('/admin/files/rename', {
   method: 'POST',
   body: JSON.stringify({ path, newName })
+})
+export const moveFile = (path, targetParentPath) => request('/admin/files/move', {
+  method: 'POST',
+  body: JSON.stringify({ path, targetParentPath })
 })
 export const moveFolder = (path, targetParentPath) => request('/admin/folders/move', {
   method: 'POST',
