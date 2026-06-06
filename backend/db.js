@@ -117,7 +117,8 @@ export const Setting = sequelize.define('Setting', {
 export const FolderMetadata = sequelize.define('FolderMetadata', {
   path: { type: DataTypes.STRING, primaryKey: true },
   coverImage: { type: DataTypes.STRING, allowNull: true },
-  note: { type: DataTypes.TEXT, allowNull: true }
+  note: { type: DataTypes.TEXT, allowNull: true },
+  marked: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
 }, {
   tableName: 'folder_metadata',
   timestamps: false
@@ -171,6 +172,17 @@ export const initDB = async () => {
       await qi.addColumn('comics', 'lastReadAt', {
         type: DataTypes.DATE,
         allowNull: true
+      })
+    }
+  } catch {}
+
+  try {
+    const folderMetadataSchema = await qi.describeTable('folder_metadata')
+    if (!folderMetadataSchema.marked) {
+      await qi.addColumn('folder_metadata', 'marked', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
       })
     }
   } catch {}

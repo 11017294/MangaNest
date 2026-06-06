@@ -344,7 +344,8 @@ const syncMovedFolderIndex = async (oldPath, newPath) => {
             if (nextPath !== metadata.path || nextCoverImage !== metadata.coverImage) {
                 const values = {
                     coverImage: nextCoverImage,
-                    note: metadata.note
+                    note: metadata.note,
+                    marked: !!metadata.marked
                 };
                 if (nextPath !== metadata.path) {
                     await FolderMetadata.destroy({ where: { path: metadata.path }, transaction });
@@ -826,17 +827,25 @@ app.get('/api/admin/folders', async (req, res) => {
         const metadataList = folderPaths.length
             ? await FolderMetadata.findAll({ where: { path: folderPaths } })
             : [];
-        const metadataMap = Object.fromEntries(metadataList.map((item) => [item.path, item.coverImage]));
+        const metadataMap = Object.fromEntries(metadataList.map((item) => [item.path, {
+            coverImage: item.coverImage,
+            marked: !!item.marked
+        }]));
+        const coverMetadataMap = Object.fromEntries(metadataList.map((item) => [item.path, item.coverImage]));
+        const hideMarked = req.query.hideMarked === 'true';
         const coverCache = new Map();
 
         for (const item of items) {
             const itemPath = path.join(fullPath, item.name);
             const itemRelativePath = path.relative(libraryPath, itemPath).replace(/\\/g, '/');
             if (item.isDirectory()) {
+                const metadata = metadataMap[itemRelativePath] || {};
+                if (hideMarked && metadata.marked) continue;
                 folders.push({
                     name: item.name,
                     path: itemRelativePath,
-                    coverImage: resolveFolderCoverImage(itemRelativePath, itemPath, libraryPath, metadataMap, coverCache)
+                    coverImage: resolveFolderCoverImage(itemRelativePath, itemPath, libraryPath, coverMetadataMap, coverCache),
+                    marked: !!metadata.marked
                 });
             } else if (item.isFile()) {
                 if (isImageFileName(item.name)) {
@@ -924,6 +933,30 @@ app.post('/api/admin/files/move', async (req, res) => {
         res.json({ success: true, ...result });
     } catch (error) {
         sendAdminError(res, error, 'Failed to move admin path');
+    }
+});
+
+app.post('/api/admin/folders/mark', async (req, res) => {
+    try {
+        const folder = await resolveLibraryRelativePath(req.body?.folderPath || '');
+        if (!folder.relativePath) return res.status(403).json({ error: 'Cannot mark manga library root' });
+        if (!fs.existsSync(folder.fullPath) || !fs.statSync(folder.fullPath).isDirectory()) {
+            return res.status(404).json({ error: 'Folder not found' });
+        }
+
+        const marked = !!req.body?.marked;
+        const [metadata] = await FolderMetadata.findOrCreate({
+            where: { path: folder.relativePath },
+            defaults: { coverImage: null, note: null, marked }
+        });
+        if (metadata.marked !== marked) {
+            metadata.marked = marked;
+            await metadata.save();
+        }
+        logInfo('admin folder marked updated', { folderPath: folder.relativePath, marked });
+        res.json({ success: true, folderPath: folder.relativePath, marked });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to update admin folder mark');
     }
 });
 

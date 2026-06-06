@@ -36,3 +36,10 @@ test('pathsOverlap detects same and nested paths', () => {
   assert.equal(pathsOverlap('Group A/Comic ABC', 'Group A/Comic A'), false)
   assert.equal(pathsOverlap('Group A/Comic A', 'Group B/Comic A'), false)
 })
+
+test('replacePathPrefix keeps exact file suffixes while moving folder metadata paths', () => {
+  assert.equal(
+    replacePathPrefix('Group A/Done Folder', 'Group A', 'Group B'),
+    'Group B/Done Folder'
+  )
+})

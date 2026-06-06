@@ -21,14 +21,20 @@
           :folder-loading="folderLoading"
           :breadcrumbs="breadcrumbs"
           :selected-paths="selectedFilePaths"
+          :filter-text="fileFilterText"
+          :hide-marked="hideMarkedFolders"
+          :visible-folders="visibleFolders"
+          :visible-images="visibleImages"
+          @blank-context="openFileBlankContextMenu"
           @context="openFileContextMenu"
-          @create-folder="openCreateFolderDialog"
           @drag-start="startDragItem"
           @drop-target="dropPathTarget"
           @open-folder="openFolder"
           @preview-image="openFolderImagePreview"
           @rename="renamePath"
           @select-item="selectFileItem"
+          @toggle-hide-marked="toggleHideMarkedFolders"
+          @update:filter-text="fileFilterText = $event"
         />
       </section>
 
@@ -170,6 +176,7 @@ import {
   setComicCategories,
   setComicCover,
   setFolderCover,
+  setFolderMarked,
   updateCategory,
   updateSetting
 } from './services/api'
@@ -182,6 +189,8 @@ const folderLoading = ref(false)
 const draggedItem = ref(null)
 const selectedFilePaths = ref([])
 const lastSelectedFilePath = ref('')
+const fileFilterText = ref('')
+const hideMarkedFolders = ref(false)
 const comicQuery = ref('')
 const comics = ref([])
 const categories = ref([])
@@ -247,9 +256,18 @@ const breadcrumbs = computed(() => {
 })
 
 const fileItems = computed(() => [
-  ...folder.folders.map((item) => ({ ...item, type: 'folder' })),
-  ...folder.images.map((item) => ({ ...item, type: 'image' }))
+  ...visibleFolders.value.map((item) => ({ ...item, type: 'folder' })),
+  ...visibleImages.value.map((item) => ({ ...item, type: 'image' }))
 ])
+
+const itemMatchesFileFilter = (item) => {
+  const query = fileFilterText.value.trim().toLowerCase()
+  if (!query) return true
+  return item.name.toLowerCase().includes(query)
+}
+
+const visibleFolders = computed(() => folder.folders.filter(itemMatchesFileFilter))
+const visibleImages = computed(() => folder.images.filter(itemMatchesFileFilter))
 
 const filteredComics = computed(() => {
   const query = comicQuery.value.trim().toLowerCase()
@@ -272,7 +290,7 @@ const loadSettings = async () => {
 const openFolder = async (path = '') => {
   folderLoading.value = true
   try {
-    const data = await fetchFolder(path)
+    const data = await fetchFolder(path, { hideMarked: hideMarkedFolders.value })
     currentPath.value = data.currentPath || ''
     folder.libraryPath = data.libraryPath || ''
     folder.folders = data.folders || []
@@ -335,6 +353,13 @@ const renamePath = async (path, newName) => {
   } catch (e) {
     notifyError(e.message || '重命名失败')
   }
+}
+
+const toggleHideMarkedFolders = async (nextValue) => {
+  hideMarkedFolders.value = nextValue
+  selectedFilePaths.value = []
+  lastSelectedFilePath.value = ''
+  await openFolder(currentPath.value)
 }
 
 const openCreateFolderDialog = () => {
@@ -513,8 +538,28 @@ const setParentFolderCover = async (folderItem) => {
   }
 }
 
+const updateFolderMarked = async (folderItem, marked) => {
+  try {
+    await setFolderMarked(folderItem.path, marked)
+    notifySuccess(marked ? '已标记为整理完成' : '已取消整理标记')
+    await openFolder(currentPath.value)
+  } catch (e) {
+    notifyError(e.message || '标记更新失败')
+  }
+}
+
 const openFolderImagePreview = (image) => {
   openPreview(image, folder.images)
+}
+
+const openFileBlankContextMenu = (event) => {
+  showContextMenu(event, '文件管理', [
+    { label: '新增文件夹', action: () => openCreateFolderDialog() },
+    {
+      label: hideMarkedFolders.value ? '显示已整理目录' : '进入整理模式',
+      action: () => toggleHideMarkedFolders(!hideMarkedFolders.value)
+    }
+  ])
 }
 
 const openFileContextMenu = (event, item, type) => {
@@ -529,6 +574,10 @@ const openFileContextMenu = (event, item, type) => {
         await revealFile(isFolder ? item.path : parentDirectoryPath(item.path))
         notifySuccess('已在资源管理器中显示')
       }
+    },
+    isFolder && {
+      label: item.marked ? '取消整理标记' : '标记为已整理',
+      action: () => updateFolderMarked(item, !item.marked)
     },
     canSetParentFolderCover(item, isFolder) && { label: '设为上级目录封面', action: () => setParentFolderCover(item) },
     !isFolder && { label: '设为当前目录封面', action: () => setCover(item) },

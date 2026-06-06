@@ -71,7 +71,11 @@ export const updateCategory = (id, payload) => request(`/categories/${id}`, {
 })
 export const deleteCategory = (id) => request(`/categories/${id}`, { method: 'DELETE' })
 
-export const fetchFolder = (dir = '') => request(`/admin/folders?dir=${encodeURIComponent(dir)}`)
+export const fetchFolder = (dir = '', options = {}) => {
+  const params = new URLSearchParams({ dir })
+  if (options.hideMarked) params.set('hideMarked', 'true')
+  return request(`/admin/folders?${params.toString()}`)
+}
 export const createFolder = (parentPath, name) => request('/admin/folders', {
   method: 'POST',
   body: JSON.stringify({ parentPath, name })
@@ -98,4 +102,8 @@ export const revealFile = (path) => request('/admin/files/reveal', {
 export const setFolderCover = (folderPath, imagePath) => request('/admin/folders/cover', {
   method: 'POST',
   body: JSON.stringify({ folderPath, imagePath })
+})
+export const setFolderMarked = (folderPath, marked) => request('/admin/folders/mark', {
+  method: 'POST',
+  body: JSON.stringify({ folderPath, marked })
 })
