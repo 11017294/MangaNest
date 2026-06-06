@@ -124,6 +124,14 @@
       @update:name="createFolderDialog.name = $event"
     />
 
+    <PrefixReplaceDialog
+      :dialog="prefixReplaceDialog"
+      @close="closePrefixReplaceDialog"
+      @save="savePrefixReplaceDialog"
+      @update:old-prefix="prefixReplaceDialog.oldPrefix = $event"
+      @update:new-prefix="prefixReplaceDialog.newPrefix = $event"
+    />
+
     <ConfirmDialog
       :dialog="confirmDialog"
       @cancel="cancelConfirmDialog"
@@ -150,6 +158,7 @@ import CreateFolderDialog from './components/CreateFolderDialog.vue'
 import DeleteConfirmDialog from './components/DeleteConfirmDialog.vue'
 import FileManagerPanel from './components/FileManagerPanel.vue'
 import ImagePreview from './components/ImagePreview.vue'
+import PrefixReplaceDialog from './components/PrefixReplaceDialog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import { useConfirmDialog } from './composables/useConfirmDialog'
 import { useContextMenu } from './composables/useContextMenu'
@@ -171,6 +180,7 @@ import {
   moveFile,
   moveFolder,
   renameFile,
+  replaceFolderPrefixes,
   revealFile,
   scanLibrary,
   setComicCategories,
@@ -219,6 +229,13 @@ const createCategoryDialog = reactive({
 const createFolderDialog = reactive({
   open: false,
   name: '',
+  error: '',
+  submitting: false
+})
+const prefixReplaceDialog = reactive({
+  open: false,
+  oldPrefix: '',
+  newPrefix: '',
   error: '',
   submitting: false
 })
@@ -396,6 +413,47 @@ const saveCreateFolderDialog = async () => {
   }
 }
 
+const openPrefixReplaceDialog = () => {
+  prefixReplaceDialog.open = true
+  prefixReplaceDialog.oldPrefix = ''
+  prefixReplaceDialog.newPrefix = ''
+  prefixReplaceDialog.error = ''
+  prefixReplaceDialog.submitting = false
+}
+
+const closePrefixReplaceDialog = () => {
+  if (prefixReplaceDialog.submitting) return
+  prefixReplaceDialog.open = false
+  prefixReplaceDialog.oldPrefix = ''
+  prefixReplaceDialog.newPrefix = ''
+  prefixReplaceDialog.error = ''
+}
+
+const savePrefixReplaceDialog = async () => {
+  const oldPrefix = prefixReplaceDialog.oldPrefix
+  const newPrefix = prefixReplaceDialog.newPrefix
+  if (!oldPrefix && !newPrefix) {
+    prefixReplaceDialog.error = '旧前缀为空时，需要填写新前缀'
+    return
+  }
+  if (oldPrefix.includes('/') || oldPrefix.includes('\\') || newPrefix.includes('/') || newPrefix.includes('\\')) {
+    prefixReplaceDialog.error = '前缀不能包含路径分隔符'
+    return
+  }
+  prefixReplaceDialog.submitting = true
+  prefixReplaceDialog.error = ''
+  try {
+    const result = await replaceFolderPrefixes(currentPath.value, oldPrefix, newPrefix)
+    notifySuccess(`已处理 ${result.renamedCount || 0} 项：${result.folderCount || 0} 个目录，${result.fileCount || 0} 个文件`)
+    prefixReplaceDialog.submitting = false
+    closePrefixReplaceDialog()
+    await openFolder(currentPath.value)
+  } catch (e) {
+    prefixReplaceDialog.submitting = false
+    prefixReplaceDialog.error = e.message || '前缀处理失败'
+  }
+}
+
 const selectFileItem = (event, item) => {
   const itemPath = item.path
   const currentItems = fileItems.value
@@ -555,6 +613,7 @@ const openFolderImagePreview = (image) => {
 const openFileBlankContextMenu = (event) => {
   showContextMenu(event, '文件管理', [
     { label: '新增文件夹', action: () => openCreateFolderDialog() },
+    { label: '批量处理前缀', action: () => openPrefixReplaceDialog() },
     {
       label: hideMarkedFolders.value ? '显示已整理目录' : '进入整理模式',
       action: () => toggleHideMarkedFolders(!hideMarkedFolders.value)

@@ -572,6 +572,167 @@ const moveAdminPath = async (sourcePath, targetParentPath, options = {}) => {
     };
 };
 
+const renameAdminPath = async (source, targetPath) => {
+    const newPath = path.relative(source.libraryPath, targetPath).replace(/\\/g, '/');
+    const sourceStat = fs.statSync(source.fullPath);
+    if (sourceStat.isDirectory()) {
+        const syncJob = acquireFolderIndexSyncLock(source.relativePath, newPath);
+        try {
+            fs.renameSync(source.fullPath, targetPath);
+        } catch (error) {
+            releaseFolderIndexSyncLock(syncJob);
+            throw error;
+        }
+        const indexSync = enqueueMovedFolderIndexSync(syncJob);
+        return { path: newPath, type: 'folder', indexSync };
+    }
+
+    fs.renameSync(source.fullPath, targetPath);
+    const indexSync = await syncMovedFileIndex(source.relativePath, newPath);
+    return { path: newPath, type: 'file', indexSync };
+};
+
+const buildPrefixedName = (name, oldPrefix, newPrefix) => {
+    if (!oldPrefix) return `${newPrefix}${name}`;
+    if (!name.startsWith(oldPrefix)) return name;
+    return `${newPrefix}${name.slice(oldPrefix.length)}`;
+};
+
+const replaceCurrentFolderPrefixes = async (dirPath, oldPrefix, newPrefix) => {
+    const folder = await resolveLibraryRelativePath(dirPath || '');
+    if (!fs.existsSync(folder.fullPath)) {
+        const error = new Error('Folder not found');
+        error.status = 404;
+        throw error;
+    }
+    if (!fs.statSync(folder.fullPath).isDirectory()) {
+        const error = new Error('Path is not a folder');
+        error.status = 400;
+        throw error;
+    }
+
+    const normalizedOldPrefix = String(oldPrefix ?? '');
+    const normalizedNewPrefix = String(newPrefix ?? '');
+    if (!normalizedOldPrefix && !normalizedNewPrefix) {
+        const error = new Error('New prefix is required when old prefix is empty');
+        error.status = 400;
+        throw error;
+    }
+    if (normalizedOldPrefix.includes('/') || normalizedOldPrefix.includes('\\')
+        || normalizedNewPrefix.includes('/') || normalizedNewPrefix.includes('\\')) {
+        const error = new Error('Prefix cannot contain path separators');
+        error.status = 400;
+        throw error;
+    }
+
+    const entries = fs.readdirSync(folder.fullPath, { withFileTypes: true }).sort(compareByName);
+    const operations = [];
+    const targetNames = new Set();
+    const existingNames = new Set(entries.map((entry) => entry.name));
+    const sourceNames = new Set();
+    for (const entry of entries) {
+        const nextName = buildPrefixedName(entry.name, normalizedOldPrefix, normalizedNewPrefix);
+        if (nextName === entry.name) continue;
+        if (!nextName.trim()) {
+            const error = new Error('Target name cannot be empty');
+            error.status = 400;
+            throw error;
+        }
+        if (nextName.includes('/') || nextName.includes('\\')) {
+            const error = new Error('Target name cannot contain path separators');
+            error.status = 400;
+            throw error;
+        }
+        sourceNames.add(entry.name);
+        if (targetNames.has(nextName)) {
+            const error = new Error(`Target name already exists: ${nextName}`);
+            error.status = 400;
+            throw error;
+        }
+        targetNames.add(nextName);
+        operations.push({ entry, nextName });
+    }
+    for (const operation of operations) {
+        if (existingNames.has(operation.nextName) && !sourceNames.has(operation.nextName)) {
+            const error = new Error(`Target name already exists: ${operation.nextName}`);
+            error.status = 400;
+            throw error;
+        }
+    }
+
+    const renameBatchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const preparedOperations = operations.map((operation, index) => {
+        const sourceFullPath = path.resolve(folder.fullPath, operation.entry.name);
+        const targetPath = path.resolve(folder.fullPath, operation.nextName);
+        const tempPath = path.resolve(folder.fullPath, `.manganest-rename-${renameBatchId}-${index}`);
+        if (!isInsideBase(targetPath, folder.libraryPath)) {
+            const error = new Error('Target path is outside manga library');
+            error.status = 403;
+            throw error;
+        }
+        if (fs.existsSync(tempPath)) {
+            const error = new Error('Temporary rename path already exists');
+            error.status = 400;
+            throw error;
+        }
+        return {
+            ...operation,
+            sourceFullPath,
+            targetPath,
+            tempPath,
+            oldPath: path.relative(folder.libraryPath, sourceFullPath).replace(/\\/g, '/'),
+            newPath: path.relative(folder.libraryPath, targetPath).replace(/\\/g, '/'),
+            type: operation.entry.isDirectory() ? 'folder' : 'file',
+            syncJob: null,
+            syncQueued: false
+        };
+    });
+
+    for (const operation of preparedOperations) {
+        if (operation.type === 'folder') {
+            operation.syncJob = acquireFolderIndexSyncLock(operation.oldPath, operation.newPath);
+        }
+    }
+
+    try {
+        for (const operation of preparedOperations) {
+            fs.renameSync(operation.sourceFullPath, operation.tempPath);
+        }
+        for (const operation of preparedOperations) {
+            fs.renameSync(operation.tempPath, operation.targetPath);
+        }
+    } catch (error) {
+        for (const operation of preparedOperations) {
+            if (operation.syncJob && !operation.syncQueued) releaseFolderIndexSyncLock(operation.syncJob);
+        }
+        throw error;
+    }
+
+    const results = [];
+    for (const operation of preparedOperations) {
+        let indexSync;
+        if (operation.type === 'folder') {
+            indexSync = enqueueMovedFolderIndexSync(operation.syncJob);
+            operation.syncQueued = true;
+        } else {
+            indexSync = await syncMovedFileIndex(operation.oldPath, operation.newPath);
+        }
+        results.push({
+            from: operation.entry.name,
+            to: operation.nextName,
+            type: operation.type,
+            indexSync
+        });
+    }
+
+    return {
+        renamedCount: results.length,
+        folderCount: results.filter((item) => item.type === 'folder').length,
+        fileCount: results.filter((item) => item.type === 'file').length,
+        items: results
+    };
+};
+
 // Helper: Convert flat list to tree
 const buildMenuTree = (menus, parentId = null) => {
     return menus
@@ -913,6 +1074,27 @@ app.post('/api/admin/files/rename', async (req, res) => {
         res.json({ success: true, path: newPath, requiresScan: true });
     } catch (error) {
         sendAdminError(res, error, 'Failed to rename admin file');
+    }
+});
+
+app.post('/api/admin/folders/prefix-replace', async (req, res) => {
+    try {
+        const result = await replaceCurrentFolderPrefixes(
+            req.body?.dir || '',
+            req.body?.oldPrefix ?? '',
+            req.body?.newPrefix ?? ''
+        );
+        logInfo('admin folder prefixes replaced', {
+            dir: req.body?.dir || '',
+            oldPrefix: req.body?.oldPrefix ?? '',
+            newPrefix: req.body?.newPrefix ?? '',
+            renamedCount: result.renamedCount,
+            folderCount: result.folderCount,
+            fileCount: result.fileCount
+        });
+        res.json({ success: true, ...result });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to replace admin folder prefixes');
     }
 });
 

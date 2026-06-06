@@ -2,19 +2,24 @@
   <section class="panel content-panel file-manager-panel">
     <div class="file-manager-toolbar">
       <nav class="file-path-breadcrumbs" aria-label="当前路径">
-        <template v-for="(crumb, index) in breadcrumbs" :key="crumb.path">
-          <button
-            v-if="index < breadcrumbs.length - 1"
-            type="button"
-            @click="$emit('open-folder', crumb.path)"
-            @dragover.prevent
-            @drop.prevent="$emit('drop-target', crumb)"
-          >
-            {{ crumb.name }}
-          </button>
-          <strong v-else>{{ crumb.name }}</strong>
-          <span v-if="index < breadcrumbs.length - 1">/</span>
-        </template>
+        <span class="breadcrumb-main">
+          <template v-for="(crumb, index) in breadcrumbs" :key="crumb.path">
+            <button
+              v-if="index < breadcrumbs.length - 1"
+              type="button"
+              @click="$emit('open-folder', crumb.path)"
+              @dragover.prevent
+              @drop.prevent="$emit('drop-target', crumb)"
+            >
+              {{ crumb.name }}
+            </button>
+            <strong v-else>{{ crumb.name }}</strong>
+            <span v-if="index < breadcrumbs.length - 1">/</span>
+          </template>
+        </span>
+        <span class="breadcrumb-count">
+          {{ visibleFolders.length }} 个目录 · {{ visibleImages.length }} 个文件
+        </span>
       </nav>
       <input
         class="file-filter-input"
@@ -39,11 +44,11 @@
           v-for="dir in visibleFolders"
           :key="dir.path"
           class="folder-card"
-          :class="{ selected: selectedPaths.includes(dir.path) }"
-          draggable="true"
+          :class="{ selected: selectedPaths.includes(dir.path), 'name-editing': editingPath === dir.path }"
+          :draggable="editingPath !== dir.path"
           @contextmenu.prevent.stop="$emit('context', $event, dir, 'folder')"
           @click="$emit('select-item', $event, dir, 'folder')"
-          @dragstart="$emit('drag-start', dir, 'folder')"
+          @dragstart="handleCardDragStart($event, dir, 'folder')"
           @dragover.prevent
           @drop.prevent.stop="$emit('drop-target', { path: dir.path, name: dir.name })"
         >
@@ -59,9 +64,16 @@
           <input
             :value="dir.name"
             class="name-input"
+            draggable="false"
             @change="$emit('rename', dir.path, $event.target.value)"
             @click.stop
+            @drag.stop
             @dragstart.stop
+            @blur="editingPath = ''"
+            @focus="editingPath = dir.path"
+            @mousedown="beginNameEdit($event, dir.path)"
+            @mousemove.stop
+            @pointerdown="beginNameEdit($event, dir.path)"
           />
         </article>
 
@@ -69,11 +81,11 @@
           v-for="image in visibleImages"
           :key="image.path"
           class="image-card"
-          :class="{ selected: selectedPaths.includes(image.path) }"
-          draggable="true"
+          :class="{ selected: selectedPaths.includes(image.path), 'name-editing': editingPath === image.path }"
+          :draggable="editingPath !== image.path"
           @contextmenu.prevent.stop="$emit('context', $event, image, 'image')"
           @click="$emit('select-item', $event, image, 'image')"
-          @dragstart="$emit('drag-start', image, 'image')"
+          @dragstart="handleCardDragStart($event, image, 'image')"
         >
           <button
             class="thumb"
@@ -84,9 +96,16 @@
           <input
             :value="image.name"
             class="name-input"
+            draggable="false"
             @change="$emit('rename', image.path, $event.target.value)"
             @click.stop
+            @drag.stop
             @dragstart.stop
+            @blur="editingPath = ''"
+            @focus="editingPath = image.path"
+            @mousedown="beginNameEdit($event, image.path)"
+            @mousemove.stop
+            @pointerdown="beginNameEdit($event, image.path)"
           />
         </article>
       </div>
@@ -95,7 +114,36 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { imageUrl } from '../services/api'
+
+const emit = defineEmits([
+  'blank-context',
+  'context',
+  'drag-start',
+  'drop-target',
+  'open-folder',
+  'preview-image',
+  'rename',
+  'select-item',
+  'toggle-hide-marked',
+  'update:filter-text'
+])
+
+const editingPath = ref('')
+
+const beginNameEdit = (event, path) => {
+  editingPath.value = path
+  event.stopPropagation()
+}
+
+const handleCardDragStart = (event, item, type) => {
+  if (editingPath.value === item.path) {
+    event.preventDefault()
+    return
+  }
+  emit('drag-start', item, type)
+}
 
 defineProps({
   folder: {
@@ -132,16 +180,4 @@ defineProps({
   }
 })
 
-defineEmits([
-  'blank-context',
-  'context',
-  'drag-start',
-  'drop-target',
-  'open-folder',
-  'preview-image',
-  'rename',
-  'select-item',
-  'toggle-hide-marked',
-  'update:filter-text'
-])
 </script>

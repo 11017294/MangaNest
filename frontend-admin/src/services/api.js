@@ -84,6 +84,10 @@ export const renameFile = (path, newName) => request('/admin/files/rename', {
   method: 'POST',
   body: JSON.stringify({ path, newName })
 })
+export const replaceFolderPrefixes = (dir, oldPrefix, newPrefix) => request('/admin/folders/prefix-replace', {
+  method: 'POST',
+  body: JSON.stringify({ dir, oldPrefix, newPrefix })
+})
 export const moveFile = (path, targetParentPath) => request('/admin/files/move', {
   method: 'POST',
   body: JSON.stringify({ path, targetParentPath })

@@ -308,8 +308,8 @@ input {
 
 .file-path-breadcrumbs {
   min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   margin: 0;
@@ -319,6 +319,20 @@ input {
   background: #111821;
   color: var(--muted);
   font-size: 12px;
+}
+
+.breadcrumb-main {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumb-count {
+  color: var(--muted);
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .file-path-breadcrumbs button {
@@ -518,6 +532,11 @@ input {
 
 .folder-card {
   cursor: grab;
+}
+
+.folder-card.name-editing,
+.image-card.name-editing {
+  cursor: text;
 }
 
 .thumb {
@@ -1102,6 +1121,11 @@ input {
   background: rgba(255, 107, 134, 0.12);
   color: var(--danger);
   font-size: 13px;
+}
+
+.form-help {
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .chapter-sidebar {
