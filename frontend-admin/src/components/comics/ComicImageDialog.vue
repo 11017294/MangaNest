@@ -45,7 +45,7 @@
 </template>
 
 <script setup>
-import { imageUrl } from '../services/api'
+import { imageUrl } from '../../services/api'
 
 defineProps({
   dialog: {
