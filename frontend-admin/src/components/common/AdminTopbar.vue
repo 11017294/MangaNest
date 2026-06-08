@@ -6,7 +6,7 @@
         :key="item.key"
         type="button"
         :class="{ active: activeTab === item.key }"
-        @click="$emit('update:active-tab', item.key)"
+        @click="emit('update:active-tab', item.key)"
       >
         {{ item.label }}
       </button>
@@ -44,29 +44,33 @@
   </header>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { searchAdminFiles } from '../../services/api'
+import type { AdminSearchResult } from '@shared/types/api'
+import { searchAdminFiles } from '@/services/api'
 
-defineProps({
-  activeTab: {
-    type: String,
-    required: true
-  },
-  menuItems: {
-    type: Array,
-    default: () => []
-  }
-})
+interface MenuItem {
+  key: string
+  label: string
+  path?: string
+}
 
-const emit = defineEmits(['open-search-result', 'update:active-tab'])
+defineProps<{
+  activeTab: string
+  menuItems: MenuItem[]
+}>()
+
+const emit = defineEmits<{
+  'open-search-result': [item: AdminSearchResult]
+  'update:active-tab': [key: string]
+}>()
 
 const searchText = ref('')
-const searchResults = ref([])
+const searchResults = ref<AdminSearchResult[]>([])
 const searching = ref(false)
 const searchError = ref('')
 const searchPanelOpen = ref(false)
-let searchTimer = null
+let searchTimer: number | null = null
 let searchSeq = 0
 
 const cleanSearchText = computed(() => searchText.value.trim())
@@ -91,7 +95,7 @@ const runSearch = async () => {
   } catch (e) {
     if (seq !== searchSeq) return
     searchResults.value = []
-    searchError.value = e.message || '搜索失败'
+    searchError.value = e instanceof Error ? e.message : '搜索失败'
   } finally {
     if (seq === searchSeq) searching.value = false
   }
@@ -103,7 +107,7 @@ const scheduleSearch = () => {
   searchTimer = window.setTimeout(runSearch, 220)
 }
 
-const openResult = (item) => {
+const openResult = (item: AdminSearchResult) => {
   emit('open-search-result', item)
   searchPanelOpen.value = false
 }

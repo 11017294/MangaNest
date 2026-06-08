@@ -4,8 +4,8 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { fetchSettings } from './services/api'
-import { applyTheme, getStoredTheme } from './utils/theme'
+import { fetchSettings } from '@/services/api'
+import { applyTheme, getStoredTheme } from '@/utils/theme'
 
 const isDev = import.meta.env.DEV
 const backendStatus = ref('checking...')
@@ -19,7 +19,7 @@ const pingBackend = async () => {
   try {
     const res = await fetch(`${getBaseUrl()}/api/menus`, { method: 'GET' })
     backendStatus.value = res.ok ? 'ok' : `error ${res.status}`
-  } catch (e) {
+  } catch {
     backendStatus.value = 'offline'
   }
 }

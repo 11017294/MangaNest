@@ -1,50 +1,45 @@
 <template>
   <main class="admin-shell">
     <AdminTopbar
-      v-model:active-tab="activeTab"
+      :active-tab="activeTab"
       :menu-items="menuItems"
+      @update:active-tab="openMenu"
       @open-search-result="openSearchResult"
     />
 
-    <KeepAlive>
-      <component :is="activeView" v-bind="activeViewProps" />
-    </KeepAlive>
+    <RouterView v-slot="{ Component }">
+      <KeepAlive>
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
   </main>
 </template>
 
-<script setup>
-import { computed, ref } from 'vue'
-import AdminTopbar from './components/common/AdminTopbar.vue'
-import AdminCategories from './views/AdminCategories.vue'
-import AdminComics from './views/AdminComics.vue'
-import AdminFiles from './views/AdminFiles.vue'
-import AdminSettings from './views/AdminSettings.vue'
+<script setup lang="ts">
+import { computed } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
+import type { AdminSearchResult } from '@shared/types/api'
+import AdminTopbar from '@/components/common/AdminTopbar.vue'
+import { adminMenuItems } from '@/router'
 
-const activeTab = ref('files')
-const fileOpenRequest = ref(null)
-const menuItems = [
-  { key: 'files', label: '文件管理' },
-  { key: 'comics', label: '漫画管理' },
-  { key: 'categories', label: '分类管理' },
-  { key: 'settings', label: '系统设置' }
-]
-const activeView = computed(() => ({
-  files: AdminFiles,
-  comics: AdminComics,
-  categories: AdminCategories,
-  settings: AdminSettings
-})[activeTab.value])
-const activeViewProps = computed(() => (
-  activeTab.value === 'files'
-    ? { openPathRequest: fileOpenRequest.value }
-    : {}
-))
+const route = useRoute()
+const router = useRouter()
+const menuItems = adminMenuItems
+const activeTab = computed(() => String(route.name || 'files'))
 
-const openSearchResult = (item) => {
-  activeTab.value = 'files'
-  fileOpenRequest.value = {
-    id: Date.now(),
-    path: item.path
-  }
+const openMenu = (key: string) => {
+  const target = menuItems.find((item) => item.key === key)
+  if (!target) return
+  router.push(target.path)
+}
+
+const openSearchResult = (item: AdminSearchResult) => {
+  router.push({
+    name: 'files',
+    query: {
+      path: item.path,
+      request: String(Date.now())
+    }
+  })
 }
 </script>

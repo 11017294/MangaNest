@@ -68,6 +68,7 @@
 
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AdminMessage from '../components/common/AdminMessage.vue'
 import ConfirmDialog from '../components/common/ConfirmDialog.vue'
 import ContextMenu from '../components/common/ContextMenu.vue'
@@ -94,13 +95,7 @@ import {
   setFolderMarked
 } from '../services/api'
 
-const props = defineProps({
-  openPathRequest: {
-    type: Object,
-    default: null
-  }
-})
-
+const route = useRoute()
 const currentPath = ref('')
 const folderLoading = ref(false)
 const draggedItem = ref(null)
@@ -202,13 +197,12 @@ const openFolder = async (path = '') => {
   }
 }
 
-watch(
-  () => props.openPathRequest,
-  (request) => {
-    if (!request) return
-    openFolder(request.path || '')
-  }
-)
+const openRouteFolder = () => {
+  const requestedPath = route.query.path
+  openFolder(typeof requestedPath === 'string' ? requestedPath : '')
+}
+
+watch(() => route.query.path, openRouteFolder)
 
 const renamePath = async (path, newName) => {
   const cleanName = String(newName || '').trim()
@@ -546,7 +540,7 @@ const removeGlobalListeners = () => {
 let hasActivated = false
 const activateView = () => {
   addGlobalListeners()
-  if (hasActivated) openFolder(currentPath.value)
+  if (hasActivated) openRouteFolder()
   hasActivated = true
 }
 
@@ -556,7 +550,7 @@ const deactivateView = () => {
 }
 
 onMounted(() => {
-  openFolder()
+  openRouteFolder()
 })
 
 onActivated(activateView)

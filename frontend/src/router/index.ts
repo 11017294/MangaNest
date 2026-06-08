@@ -1,12 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Home from '../views/Home.vue'
-import Shelf from '../views/Shelf.vue'
-import ComicDetail from '../views/ComicDetail.vue'
-import Reader from '../views/Reader.vue'
-import Recent from '../views/Recent.vue'
-import Settings from '../views/Settings.vue'
-import Ranking from '../views/Ranking.vue'
-import Categories from '../views/Categories.vue'
+import Home from '@/views/Home.vue'
+import Shelf from '@/views/Shelf.vue'
+import ComicDetail from '@/views/ComicDetail.vue'
+import Reader from '@/views/Reader.vue'
+import Recent from '@/views/Recent.vue'
+import Settings from '@/views/Settings.vue'
+import Ranking from '@/views/Ranking.vue'
+import Categories from '@/views/Categories.vue'
 
 const routes = [
   { path: '/', component: Home },

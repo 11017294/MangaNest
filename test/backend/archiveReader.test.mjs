@@ -13,12 +13,14 @@ const createZip = () => {
   fs.writeFileSync(path.join(source, 'chapter', '002.jpg'), 'two')
   fs.writeFileSync(path.join(source, 'chapter', '001.jpg'), 'one')
   fs.writeFileSync(path.join(source, 'chapter', 'note.txt'), 'note')
+  const zipArchive = path.join(dir, 'chapter.zip')
   const archive = path.join(dir, 'chapter.cbz')
   execFileSync('powershell', [
     '-NoProfile',
     '-Command',
-    `Compress-Archive -Path '${source}\\*' -DestinationPath '${archive}'`
+    `Compress-Archive -Path '${source}\\*' -DestinationPath '${zipArchive}'`
   ])
+  fs.renameSync(zipArchive, archive)
   return archive
 }
 
