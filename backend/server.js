@@ -140,6 +140,50 @@ const resolveFolderCoverImage = (relativePath, fullPath, libraryPath, metadataMa
         || findFirstImageInFolder(fullPath, libraryPath, cache);
 };
 
+const parentRelativePath = (relativePath) => {
+    const normalizedPath = normalizeRelativePath(relativePath);
+    const separatorIndex = normalizedPath.lastIndexOf('/');
+    return separatorIndex > 0 ? normalizedPath.slice(0, separatorIndex) : '';
+};
+
+const searchLibraryFolders = (libraryPath, keyword, limit = 60) => {
+    const query = String(keyword || '').trim().toLowerCase();
+    if (!query) return [];
+
+    const results = [];
+    const visit = (folderPath) => {
+        if (results.length >= limit) return;
+
+        let items = [];
+        try {
+            items = fs.readdirSync(folderPath, { withFileTypes: true }).sort(compareByName);
+        } catch {
+            return;
+        }
+
+        for (const item of items) {
+            if (results.length >= limit) return;
+
+            const itemPath = path.join(folderPath, item.name);
+            const relativePath = path.relative(libraryPath, itemPath).replace(/\\/g, '/');
+            if (item.isDirectory()) {
+                if (item.name.toLowerCase().includes(query)) {
+                    results.push({
+                        type: 'folder',
+                        name: item.name,
+                        path: relativePath,
+                        parentPath: parentRelativePath(relativePath)
+                    });
+                }
+                visit(itemPath);
+            }
+        }
+    };
+
+    visit(libraryPath);
+    return results;
+};
+
 const resolveLibraryRelativePath = async (relativePath = '') => {
     const libraryPath = path.resolve(await getLibraryPath());
     const normalizedRelativePath = normalizeRelativePath(relativePath);
@@ -970,6 +1014,18 @@ app.delete('/api/comics/:id', async (req, res) => {
 });
 
 // --- API: Admin File Management ---
+
+app.get('/api/admin/files/search', async (req, res) => {
+    try {
+        const libraryPath = path.resolve(await getLibraryPath());
+        if (!fs.existsSync(libraryPath)) return res.json({ libraryPath, results: [] });
+        const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), 100);
+        const results = searchLibraryFolders(libraryPath, req.query.q || '', limit);
+        res.json({ libraryPath, results });
+    } catch (error) {
+        sendAdminError(res, error, 'Failed to search admin files');
+    }
+});
 
 app.get('/api/admin/folders', async (req, res) => {
     try {

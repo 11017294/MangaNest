@@ -76,6 +76,10 @@ export const fetchFolder = (dir = '', options = {}) => {
   if (options.hideMarked) params.set('hideMarked', 'true')
   return request(`/admin/folders?${params.toString()}`)
 }
+export const searchAdminFiles = (query, limit = 60) => {
+  const params = new URLSearchParams({ q: query, limit: String(limit) })
+  return request(`/admin/files/search?${params.toString()}`)
+}
 export const createFolder = (parentPath, name) => request('/admin/folders', {
   method: 'POST',
   body: JSON.stringify({ parentPath, name })

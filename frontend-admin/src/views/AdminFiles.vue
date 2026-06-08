@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import AdminMessage from '../components/common/AdminMessage.vue'
 import ConfirmDialog from '../components/common/ConfirmDialog.vue'
 import ContextMenu from '../components/common/ContextMenu.vue'
@@ -93,6 +93,13 @@ import {
   setFolderCover,
   setFolderMarked
 } from '../services/api'
+
+const props = defineProps({
+  openPathRequest: {
+    type: Object,
+    default: null
+  }
+})
 
 const currentPath = ref('')
 const folderLoading = ref(false)
@@ -194,6 +201,14 @@ const openFolder = async (path = '') => {
     folderLoading.value = false
   }
 }
+
+watch(
+  () => props.openPathRequest,
+  (request) => {
+    if (!request) return
+    openFolder(request.path || '')
+  }
+)
 
 const renamePath = async (path, newName) => {
   const cleanName = String(newName || '').trim()
