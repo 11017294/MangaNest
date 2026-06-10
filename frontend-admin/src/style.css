@@ -1,7 +1,7 @@
 :root {
   color: #e8edf2;
   background: #11151c;
-  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --bg: #11151c;
   --panel: #1a2029;
   --panel-strong: #222a35;
@@ -429,9 +429,7 @@ input {
   padding: 18px;
   border: 1px solid rgba(85, 214, 190, 0.36);
   border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(85, 214, 190, 0.14), transparent 42%),
-    var(--panel);
+  background: linear-gradient(135deg, rgba(85, 214, 190, 0.14), transparent 42%), var(--panel);
 }
 
 .settings-console {
@@ -481,6 +479,71 @@ input {
   gap: 10px;
 }
 
+.index-maintenance {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #141b24;
+}
+
+.index-maintenance-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.index-maintenance-copy strong {
+  font-size: 16px;
+}
+
+.index-maintenance-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.index-maintenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.index-summary {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.index-summary div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: var(--field);
+}
+
+.index-summary dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.index-summary dd {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 900;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 11px;
@@ -522,7 +585,7 @@ input {
   height: 3px;
   border-radius: 999px 999px 0 0;
   background: var(--accent);
-  content: "";
+  content: '';
 }
 
 .admin-global-search {
@@ -1422,6 +1485,18 @@ input {
 
   .library-console {
     grid-template-columns: 1fr;
+  }
+
+  .index-maintenance {
+    grid-template-columns: 1fr;
+  }
+
+  .index-maintenance-actions {
+    justify-content: flex-start;
+  }
+
+  .index-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .comic-row {

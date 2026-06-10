@@ -58,6 +58,52 @@ export interface AppSettings {
   [key: string]: unknown
 }
 
+export interface IndexSummary {
+  totalIssues: number
+  missingComics: number
+  missingComicCovers: number
+  invalidChapters: number
+  invalidPages: number
+  invalidFolderMetadata: number
+  invalidFolderCovers: number
+  invalidProgress: number
+  invalidCategoryLinks: number
+}
+
+export interface LibraryScanStats {
+  scannedComics: number
+  createdComics: number
+  updatedComics: number
+  movedComics: number
+  mergedStaleComics?: number
+  syncedChapters: number
+  syncedPages: number
+  removedChapters: number
+}
+
+export interface LibraryScanResponse {
+  success: boolean
+  libraryPath: string
+  rootMode: string
+  comicCount: number
+  chapterCount: number
+  pageCount: number
+  index?: LibraryScanStats
+}
+
+export interface IndexInspectResponse {
+  libraryPath: string
+  summary: IndexSummary
+  [key: string]: unknown
+}
+
+export interface IndexCleanupResponse {
+  success: boolean
+  libraryPath: string
+  checked: IndexSummary
+  cleaned: Record<string, number>
+}
+
 export interface FolderItem {
   type: 'folder'
   name: string

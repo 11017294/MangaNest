@@ -57,6 +57,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AppTopNav from '../components/AppTopNav.vue'
 import ComicCard from '../components/ComicCard.vue'
+import { useScrollMemory } from '../composables/useScrollMemory'
 import { fetchCategories, fetchComics } from '../services/api'
 
 const comics = ref([])
@@ -64,6 +65,7 @@ const categories = ref([])
 const activeCategoryId = ref('all')
 const query = ref('')
 const loading = ref(true)
+const ready = computed(() => !loading.value)
 
 const categoryCounts = computed(() => {
   const counts = new Map()
@@ -140,4 +142,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+useScrollMemory(ready)
 </script>

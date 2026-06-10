@@ -18,7 +18,11 @@ import {
     FolderMetadata,
     initDB
 } from './db.js';
-import { scanMangaLibrary } from './mangaScanner.js';
+import {
+    cleanupInvalidMangaIndex,
+    inspectMangaIndex,
+    rebuildMangaIndex
+} from './indexMaintenance.js';
 import { pathsOverlap, replacePathPrefix } from './pathIndexSync.js';
 import { readArchiveEntryBuffer } from './archiveReader.js';
 import { sortRankedComics } from './ranking.js';
@@ -242,77 +246,6 @@ const serializeComic = (comic) => {
         progress: plain.progress || null,
         chapterCount: plain.chapters?.length ?? plain.chapterCount ?? 0
     };
-};
-
-const rebuildMangaIndex = async (libraryPath, options = {}) => {
-    const result = await scanMangaLibrary(libraryPath, options);
-    const existingComics = await Comic.findAll({
-        include: [{ model: Category, as: 'categories', required: false }]
-    });
-    const metadataBySourcePath = new Map(existingComics.map((comic) => [
-        comic.sourcePath,
-        {
-            favorite: comic.favorite,
-            readCount: comic.readCount || 0,
-            lastReadAt: comic.lastReadAt,
-            categoryNames: (comic.categories || []).map((category) => category.name)
-        }
-    ]));
-
-    await sequelize.transaction(async (transaction) => {
-        await ReadingProgress.destroy({ where: {}, transaction });
-        await sequelize.models.ComicCategory.destroy({ where: {}, transaction });
-        await Page.destroy({ where: {}, transaction });
-        await Chapter.destroy({ where: {}, transaction });
-        await Comic.destroy({ where: {}, transaction });
-
-        for (const comicData of result.comics) {
-            const comic = await Comic.create({
-                title: comicData.title,
-                coverPath: comicData.coverPath,
-                sourcePath: comicData.sourcePath,
-                sortOrder: comicData.sortOrder,
-                favorite: metadataBySourcePath.get(comicData.sourcePath)?.favorite || false,
-                readCount: metadataBySourcePath.get(comicData.sourcePath)?.readCount || 0,
-                lastReadAt: metadataBySourcePath.get(comicData.sourcePath)?.lastReadAt || null
-            }, { transaction });
-
-            const categoryNames = metadataBySourcePath.get(comicData.sourcePath)?.categoryNames || [];
-            for (const categoryName of categoryNames) {
-                const [category] = await Category.findOrCreate({
-                    where: { name: categoryName },
-                    defaults: { sortOrder: 0 },
-                    transaction
-                });
-                await comic.addCategory(category, { transaction });
-            }
-
-            for (const chapterData of comicData.chapters) {
-                const chapter = await Chapter.create({
-                    comicId: comic.id,
-                    title: chapterData.title,
-                    number: chapterData.number,
-                    path: chapterData.path,
-                    type: chapterData.type,
-                    pageCount: chapterData.pageCount,
-                    sortOrder: chapterData.sortOrder
-                }, { transaction });
-
-                const pages = chapterData.pages.map((page) => ({
-                    chapterId: chapter.id,
-                    pageIndex: page.pageIndex,
-                    name: page.name,
-                    filePath: page.filePath,
-                    width: page.width,
-                    height: page.height,
-                    fileSize: page.fileSize
-                }));
-                if (pages.length) await Page.bulkCreate(pages, { transaction });
-            }
-        }
-    });
-
-    return result;
 };
 
 const syncMovedFolderIndex = async (oldPath, newPath) => {
@@ -865,6 +798,7 @@ app.post('/api/library/scan', async (req, res) => {
             comicCount,
             chapterCount,
             pageCount,
+            index: result.index,
             durationMs: Date.now() - startedAt
         });
         res.json({
@@ -873,11 +807,54 @@ app.post('/api/library/scan', async (req, res) => {
             rootMode,
             comicCount,
             chapterCount,
-            pageCount
+            pageCount,
+            index: result.index
         });
     } catch (error) {
         logError('Error scanning manga library:', error);
         res.status(500).json({ error: 'Failed to scan manga library', detail: error?.message || String(error) });
+    }
+});
+
+app.get('/api/library/index/inspect', async (req, res) => {
+    try {
+        const libraryPath = req.query?.libraryPath || await getLibraryPath();
+        if (!fs.existsSync(libraryPath)) {
+            return res.status(404).json({ error: 'Manga library not found', libraryPath });
+        }
+
+        const report = await inspectMangaIndex(libraryPath);
+        res.json(report);
+    } catch (error) {
+        logError('Error inspecting manga index:', error);
+        res.status(500).json({ error: 'Failed to inspect manga index', detail: error?.message || String(error) });
+    }
+});
+
+app.post('/api/library/index/cleanup', async (req, res) => {
+    try {
+        const libraryPath = req.body?.libraryPath || await getLibraryPath();
+        if (!fs.existsSync(libraryPath)) {
+            return res.status(404).json({ error: 'Manga library not found', libraryPath });
+        }
+
+        const startedAt = Date.now();
+        logInfo('library index cleanup started', { libraryPath });
+        const result = await cleanupInvalidMangaIndex(libraryPath);
+        logInfo('library index cleanup completed', {
+            libraryPath,
+            checked: result.checked,
+            cleaned: result.cleaned,
+            durationMs: Date.now() - startedAt
+        });
+        res.json({
+            success: true,
+            libraryPath,
+            ...result
+        });
+    } catch (error) {
+        logError('Error cleaning manga index:', error);
+        res.status(500).json({ error: 'Failed to clean manga index', detail: error?.message || String(error) });
     }
 });
 
@@ -1124,10 +1101,9 @@ app.post('/api/admin/files/rename', async (req, res) => {
         if (!isInsideBase(targetPath, libraryPath)) return res.status(403).json({ error: 'Target path is outside manga library' });
         if (fs.existsSync(targetPath)) return res.status(400).json({ error: 'Target name already exists' });
 
-        fs.renameSync(fullPath, targetPath);
-        const newPath = path.relative(libraryPath, targetPath).replace(/\\/g, '/');
-        logInfo('admin file renamed', { from: relativePath, to: newPath });
-        res.json({ success: true, path: newPath, requiresScan: true });
+        const result = await renameAdminPath({ libraryPath, relativePath, fullPath }, targetPath);
+        logInfo('admin file renamed', { from: relativePath, to: result.path, type: result.type, indexSync: result.indexSync });
+        res.json({ success: true, path: result.path, type: result.type, requiresScan: false, indexSync: result.indexSync });
     } catch (error) {
         sendAdminError(res, error, 'Failed to rename admin file');
     }

@@ -38,11 +38,13 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppTabBar from '../components/AppTabBar.vue'
 import ComicCard from '../components/ComicCard.vue'
+import { useScrollMemory } from '../composables/useScrollMemory'
 import { fetchComics } from '../services/api'
 
 const comics = ref([])
 const query = ref('')
 const loading = ref(true)
+const ready = computed(() => !loading.value)
 
 const filteredComics = computed(() => {
   const keyword = query.value.trim().toLowerCase()
@@ -57,4 +59,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+useScrollMemory(ready)
 </script>

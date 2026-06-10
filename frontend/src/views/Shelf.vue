@@ -50,12 +50,14 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppTabBar from '../components/AppTabBar.vue'
 import ComicCard from '../components/ComicCard.vue'
+import { useScrollMemory } from '../composables/useScrollMemory'
 import { fetchComics, fetchRecent, imageUrl } from '../services/api'
 
 const comics = ref([])
 const recentItems = ref([])
 const loading = ref(true)
 const tab = ref('favorite')
+const ready = computed(() => !loading.value)
 
 const favorites = computed(() => comics.value.filter((comic) => comic.favorite))
 
@@ -76,4 +78,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+useScrollMemory(ready, () => `/shelf?tab=${tab.value}`)
 </script>

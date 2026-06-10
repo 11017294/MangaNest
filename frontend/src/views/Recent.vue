@@ -32,13 +32,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppTopNav from '../components/AppTopNav.vue'
+import { useScrollMemory } from '../composables/useScrollMemory'
 import { fetchRecent, imageUrl } from '../services/api'
 
 const items = ref([])
 const loading = ref(true)
+const ready = computed(() => !loading.value)
 
 const formatDate = (value) => {
   if (!value) return ''
@@ -52,4 +54,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+useScrollMemory(ready)
 </script>
